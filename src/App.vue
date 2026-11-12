@@ -80,6 +80,30 @@ const stats = computed(() => [
 
 const recetaEntidad = computed(() => (recetaSeleccionada.value.tipo === 'variantes' ? variantes.value : extras.value))
 
+function saleDetails(venta) {
+  return venta.detalle_venta || venta.detalles || []
+}
+
+function saleProductName(detail) {
+  const variante = detail.variante || detail.variantes || {}
+  const producto = variante.producto || variante.productos || {}
+  return producto.nombre || `Variante ${detail.id_variante}`
+}
+
+function saleVariantSize(detail) {
+  const variante = detail.variante || detail.variantes || {}
+  return variante.tamano || 'Sin tamaño'
+}
+
+function saleExtras(detail) {
+  return detail.detalle_venta_extra || detail.extras || []
+}
+
+function saleExtraName(extra) {
+  const item = extra.extra || extra.extras || {}
+  return item.nombre || `Extra ${extra.id_extra}`
+}
+
 function clearFeedback() {
   message.value = ''
   error.value = ''
@@ -718,8 +742,27 @@ onMounted(loadData)
           <div class="panel">
             <div class="panel-heading"><div><p class="eyebrow">Operaciones</p><h2>Ventas registradas</h2></div><span class="count">{{ ventas.length }}</span></div>
             <div v-if="ventas.length" class="table-wrap">
-              <table><thead><tr><th>Fecha</th><th>Cliente</th><th>Total</th></tr></thead>
-                <tbody><tr v-for="venta in ventas" :key="venta.id_venta"><td>{{ venta.fecha || venta.created_at }}</td><td>{{ venta.clientes?.nombre || venta.id_cliente || 'Público general' }}</td><td>{{ venta.total }}</td></tr></tbody>
+              <table><thead><tr><th>Fecha</th><th>Cliente</th><th>Detalle</th><th>Total</th></tr></thead>
+                <tbody>
+                  <tr v-for="venta in ventas" :key="venta.id_venta">
+                    <td>{{ venta.fecha || venta.created_at }}</td>
+                    <td>{{ venta.clientes?.nombre || venta.cliente?.nombre || venta.id_cliente || 'Público general' }}</td>
+                    <td>
+                      <div v-if="saleDetails(venta).length" class="sale-details">
+                        <div v-for="(detalle, detailIndex) in saleDetails(venta)" :key="detailIndex">
+                          <strong>{{ detalle.cantidad }} × {{ saleProductName(detalle) }}</strong>
+                          <span>{{ saleVariantSize(detalle) }}</span>
+                          <small v-if="saleExtras(detalle).length">
+                            Extras:
+                            {{ saleExtras(detalle).map((extra) => `${extra.cantidad} × ${saleExtraName(extra)}`).join(', ') }}
+                          </small>
+                        </div>
+                      </div>
+                      <span v-else class="muted">Sin detalle</span>
+                    </td>
+                    <td>{{ venta.total }}</td>
+                  </tr>
+                </tbody>
               </table>
             </div>
             <p v-else class="empty-state">No hay ventas para mostrar.</p>
@@ -831,6 +874,10 @@ th { padding: 0 12px 11px; color: #89938e; font-size: 11px; font-weight: 700; te
 td { padding: 13px 12px; border-top: 1px solid #edf0ed; }
 td:first-child, th:first-child { padding-left: 0; }
 td:last-child, th:last-child { padding-right: 0; }
+.sale-details { display: grid; gap: 7px; min-width: 240px; }
+.sale-details > div { display: grid; gap: 2px; }
+.sale-details span, .sale-details small { color: #78827d; font-size: 11px; }
+.sale-details small { line-height: 1.4; }
 .tag { display: inline-block; padding: 4px 8px; border-radius: 12px; background: #eaf3ec; color: #4e835e; font-size: 11px; font-weight: 600; }
 .tag.warning { background: #fbf0e5; color: #ad7448; }
 .empty-state { margin: 0; padding: 25px 0 5px; color: #89938e; font-size: 13px; text-align: center; }
