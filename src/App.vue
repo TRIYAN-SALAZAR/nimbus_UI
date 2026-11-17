@@ -15,6 +15,7 @@ const sections = [
   { id: 'recetas', label: 'Recetas', icon: 'R' },
   { id: 'compras', label: 'Compras', icon: 'Co' },
   { id: 'ventas', label: 'Ventas', icon: 'Ve' },
+  { id: 'tickets', label: 'Tickets', icon: 'T' },
 ]
 
 const activeSection = ref('resumen')
@@ -33,6 +34,10 @@ const metodosPago = ref([])
 const origenesPago = ref([])
 const compras = ref([])
 const ventas = ref([])
+const savedTickets = ref([])
+const cashReceived = ref('')
+const showPayment = ref(false)
+const selectedVariantIndex = ref(0)
 const recetaSeleccionada = ref({ tipo: 'variantes', id: '' })
 const recetaDetalle = ref([])
 
@@ -59,11 +64,7 @@ const forms = reactive({
     folio_nota: '',
     id_metodo_pago: '',
     id_cliente: '',
-    detalles: [{
-      id_variante: '',
-      cantidad: 1,
-      extras: [{ id_extra: '', cantidad: 1 }],
-    }],
+    detalles: [],
   },
 })
 
@@ -102,6 +103,127 @@ function saleExtras(detail) {
 function saleExtraName(extra) {
   const item = extra.extra || extra.extras || {}
   return item.nombre || `Extra ${extra.id_extra}`
+}
+
+function savedTicketsStorageKey() {
+  return 'nimbus_saved_tickets'
+}
+
+function restoreSavedTickets() {
+  try {
+    savedTickets.value = JSON.parse(localStorage.getItem(savedTicketsStorageKey()) || '[]')
+  } catch {
+    savedTickets.value = []
+  }
+}
+
+function persistSavedTickets() {
+  localStorage.setItem(savedTicketsStorageKey(), JSON.stringify(savedTickets.value))
+}
+
+function variantProductName(variante) {
+  return variante.productos?.nombre || variante.producto?.nombre || `Producto ${variante.id_producto}`
+}
+
+function addVariantToTicket(variante) {
+  const existingIndex = forms.venta.detalles.findIndex(
+    (detalle) => Number(detalle.id_variante) === Number(variante.id_variante),
+  )
+
+  if (existingIndex >= 0) {
+    forms.venta.detalles[existingIndex].cantidad += 1
+  } else {
+    forms.venta.detalles.push({
+      id_variante: variante.id_variante,
+      cantidad: 1,
+      extras: [],
+    })
+  }
+
+  const detailIndex = forms.venta.detalles.findIndex(
+    (detalle) => Number(detalle.id_variante) === Number(variante.id_variante),
+  )
+  selectedVariantIndex.value = detailIndex
+  clearFeedback()
+}
+
+function removeTicketDetail(index) {
+  forms.venta.detalles.splice(index, 1)
+  if (selectedVariantIndex.value >= forms.venta.detalles.length) {
+    selectedVariantIndex.value = Math.max(forms.venta.detalles.length - 1, 0)
+  }
+}
+
+function changeTicketQuantity(index, amount) {
+  const detalle = forms.venta.detalles[index]
+  detalle.cantidad = Math.max(1, Number(detalle.cantidad) + amount)
+}
+
+function addExtraToSelected(extra) {
+  if (!forms.venta.detalles.length) {
+    error.value = 'Selecciona primero un producto.'
+    return
+  }
+
+  if (selectedVariantIndex.value >= forms.venta.detalles.length) {
+    selectedVariantIndex.value = 0
+  }
+
+  const detalle = forms.venta.detalles[selectedVariantIndex.value]
+  const existing = detalle.extras.find((item) => Number(item.id_extra) === Number(extra.id_extra))
+  if (existing) {
+    existing.cantidad += 1
+  } else {
+    detalle.extras.push({ id_extra: extra.id_extra, cantidad: 1 })
+  }
+  clearFeedback()
+}
+
+function removeExtraFromDetail(detailIndex, extraIndex) {
+  forms.venta.detalles[detailIndex].extras.splice(extraIndex, 1)
+}
+
+function findVariant(idVariante) {
+  return variantes.value.find((item) => Number(item.id_variante) === Number(idVariante))
+}
+
+function findExtra(idExtra) {
+  return extras.value.find((item) => Number(item.id_extra) === Number(idExtra))
+}
+
+function ticketSubtotal() {
+  return forms.venta.detalles.reduce((total, detalle) => {
+    const variante = findVariant(detalle.id_variante)
+    const productPrice = Number(variante?.precio_actual || 0) * Number(detalle.cantidad)
+    const extrasPrice = detalle.extras.reduce((subtotal, extra) => {
+      const extraData = findExtra(extra.id_extra)
+      return subtotal + Number(extraData?.precio_actual || 0) * Number(extra.cantidad)
+    }, 0)
+    return total + productPrice + extrasPrice
+  }, 0)
+}
+
+function ticketChange() {
+  const received = Number(cashReceived.value)
+  if (!cashReceived.value || received < ticketSubtotal()) return 0
+  return received - ticketSubtotal()
+}
+
+function salePayload(form) {
+  return {
+    consumo_local: form.consumo_local,
+    requiere_nota: form.requiere_nota,
+    folio_nota: form.requiere_nota ? form.folio_nota : undefined,
+    id_metodo_pago: Number(form.id_metodo_pago),
+    id_cliente: form.id_cliente ? Number(form.id_cliente) : null,
+    detalles: form.detalles.map((detalle) => ({
+      id_variante: Number(detalle.id_variante),
+      cantidad: Number(detalle.cantidad),
+      extras: detalle.extras
+        .filter((extra) => extra.id_extra)
+        .map((extra) => ({ id_extra: Number(extra.id_extra), cantidad: Number(extra.cantidad) })),
+    })),
+  }
 }
 
 function clearFeedback() {
@@ -301,24 +423,32 @@ async function createPurchase() {
 
 async function createSale() {
   const form = forms.venta
-  const payload = {
-    consumo_local: form.consumo_local,
-    requiere_nota: form.requiere_nota,
-    folio_nota: form.requiere_nota ? form.folio_nota : undefined,
-    id_metodo_pago: Number(form.id_metodo_pago),
-    id_cliente: form.id_cliente ? Number(form.id_cliente) : null,
-    detalles: form.detalles.map((detalle) => ({
-      id_variante: Number(detalle.id_variante),
-      cantidad: Number(detalle.cantidad),
-      extras: detalle.extras
-        .filter((extra) => extra.id_extra)
-        .map((extra) => ({ id_extra: Number(extra.id_extra), cantidad: Number(extra.cantidad) })),
-    })),
+  if (!form.detalles.length) {
+    error.value = 'Agrega al menos un producto al ticket.'
+    return
   }
-  await registerOperation('/api/ventas', payload, 'Venta registrada correctamente.')
-  form.folio_nota = ''
-  form.id_cliente = ''
-  form.detalles = [{ id_variante: '', cantidad: 1, extras: [{ id_extra: '', cantidad: 1 }] }]
+  if (!form.id_metodo_pago) {
+    error.value = 'Selecciona un método de pago.'
+    return
+  }
+  const paymentMethod = metodosPago.value.find(
+    (item) => Number(item.id_metodo_pago) === Number(form.id_metodo_pago),
+  )
+  const isCash = /efectivo|cash/i.test(paymentMethod?.nombre || '')
+  if (isCash && Number(cashReceived.value) < ticketSubtotal()) {
+    error.value = 'El importe recibido no cubre el total del ticket.'
+    return
+  }
+
+  const payload = salePayload(form)
+  await registerOperation('/api/ventas', payload, 'Venta cobrada y registrada correctamente.')
+  if (!error.value) {
+    form.folio_nota = ''
+    form.id_cliente = ''
+    form.detalles = []
+    cashReceived.value = ''
+    showPayment.value = false
+  }
 }
 
 async function registerOperation(endpoint, payload, successMessage) {
@@ -343,24 +473,60 @@ function removePurchaseDetail(index) {
   if (forms.compra.detalles.length > 1) forms.compra.detalles.splice(index, 1)
 }
 
-function addSaleDetail() {
-  forms.venta.detalles.push({
-    id_variante: '',
-    cantidad: 1,
-    extras: [{ id_extra: '', cantidad: 1 }],
-  })
+function saveTicket() {
+  if (!forms.venta.detalles.length) {
+    error.value = 'Agrega al menos un producto antes de guardar el ticket.'
+    return
+  }
+
+  const ticket = {
+    id: `ticket-${Date.now()}`,
+    created_at: new Date().toISOString(),
+    venta: JSON.parse(JSON.stringify({
+      consumo_local: forms.venta.consumo_local,
+      requiere_nota: forms.venta.requiere_nota,
+      folio_nota: forms.venta.folio_nota,
+      id_metodo_pago: forms.venta.id_metodo_pago,
+      id_cliente: forms.venta.id_cliente,
+      detalles: forms.venta.detalles,
+    })),
+  }
+  savedTickets.value.unshift(ticket)
+  persistSavedTickets()
+  forms.venta.detalles = []
+  forms.venta.folio_nota = ''
+  forms.venta.id_cliente = ''
+  cashReceived.value = ''
+  showPayment.value = false
+  message.value = 'Ticket guardado en este navegador.'
 }
 
-function removeSaleDetail(index) {
-  if (forms.venta.detalles.length > 1) forms.venta.detalles.splice(index, 1)
+function restoreSavedTicket(ticket) {
+  Object.assign(forms.venta, JSON.parse(JSON.stringify(ticket.venta)))
+  savedTickets.value = savedTickets.value.filter((item) => item.id !== ticket.id)
+  persistSavedTickets()
+  selectedVariantIndex.value = 0
+  activeSection.value = 'ventas'
+  clearFeedback()
+  message.value = 'Ticket recuperado.'
 }
 
-function addSaleExtra(detail) {
-  detail.extras.push({ id_extra: '', cantidad: 1 })
+function deleteSavedTicket(ticketId) {
+  savedTickets.value = savedTickets.value.filter((item) => item.id !== ticketId)
+  persistSavedTickets()
 }
 
-function removeSaleExtra(detail, index) {
-  if (detail.extras.length > 1) detail.extras.splice(index, 1)
+function openPayment() {
+  if (!forms.venta.detalles.length) {
+    error.value = 'Agrega al menos un producto al ticket.'
+    return
+  }
+  if (!forms.venta.id_metodo_pago) {
+    error.value = 'Selecciona un método de pago.'
+    return
+  }
+  showPayment.value = true
+  clearFeedback()
 }
 
 function selectSection(section) {
@@ -368,7 +534,10 @@ function selectSection(section) {
   clearFeedback()
 }
 
-onMounted(loadData)
+onMounted(() => {
+  restoreSavedTickets()
+  loadData()
+})
 </script>
 
 <template>
@@ -738,56 +907,141 @@ onMounted(loadData)
       </section>
 
       <section v-else-if="activeSection === 'ventas'" class="content-section">
-        <div class="section-grid">
-          <div class="panel">
-            <div class="panel-heading"><div><p class="eyebrow">Operaciones</p><h2>Ventas registradas</h2></div><span class="count">{{ ventas.length }}</span></div>
-            <div v-if="ventas.length" class="table-wrap">
-              <table><thead><tr><th>Fecha</th><th>Cliente</th><th>Detalle</th><th>Total</th></tr></thead>
-                <tbody>
-                  <tr v-for="venta in ventas" :key="venta.id_venta">
-                    <td>{{ venta.fecha || venta.created_at }}</td>
-                    <td>{{ venta.clientes?.nombre || venta.cliente?.nombre || venta.id_cliente || 'Público general' }}</td>
-                    <td>
-                      <div v-if="saleDetails(venta).length" class="sale-details">
-                        <div v-for="(detalle, detailIndex) in saleDetails(venta)" :key="detailIndex">
-                          <strong>{{ detalle.cantidad }} × {{ saleProductName(detalle) }}</strong>
-                          <span>{{ saleVariantSize(detalle) }}</span>
-                          <small v-if="saleExtras(detalle).length">
-                            Extras:
-                            {{ saleExtras(detalle).map((extra) => `${extra.cantidad} × ${saleExtraName(extra)}`).join(', ') }}
-                          </small>
-                        </div>
-                      </div>
-                      <span v-else class="muted">Sin detalle</span>
-                    </td>
-                    <td>{{ venta.total }}</td>
-                  </tr>
-                </tbody>
-              </table>
+        <div class="pos-layout">
+          <div class="panel pos-catalog">
+            <div class="panel-heading">
+              <div><p class="eyebrow">Catálogo</p><h2>Selecciona productos</h2></div>
+              <span class="count">{{ variantes.length }}</span>
             </div>
-            <p v-else class="empty-state">No hay ventas para mostrar.</p>
+            <div v-if="variantes.length" class="product-grid">
+              <button
+                v-for="variante in variantes"
+                :key="variante.id_variante"
+                class="product-card"
+                type="button"
+                @click="addVariantToTicket(variante)"
+              >
+                <strong>{{ variantProductName(variante) }}</strong>
+                <span>{{ variante.tamano || 'Sin tamaño' }}</span>
+                <b>{{ Number(variante.precio_actual).toFixed(2) }}</b>
+              </button>
+            </div>
+            <p v-else class="empty-state">No hay variantes disponibles.</p>
+
+            <div class="extras-section">
+              <div class="details-heading"><h3>Extras</h3><span class="muted">Se agregan al producto seleccionado</span></div>
+              <div v-if="extras.length" class="extra-grid">
+                <button v-for="extra in extras" :key="extra.id_extra" class="extra-card" type="button" @click="addExtraToSelected(extra)">
+                  <span>{{ extra.nombre }}</span>
+                  <strong>+ {{ Number(extra.precio_actual).toFixed(2) }}</strong>
+                </button>
+              </div>
+              <p v-else class="empty-state">No hay extras disponibles.</p>
+            </div>
           </div>
-          <form class="panel form-panel" @submit.prevent="createSale">
-            <p class="eyebrow">Nueva operación</p><h2>Registrar venta</h2>
-            <label>Método de pago<select v-model="forms.venta.id_metodo_pago" required><option value="" disabled>Selecciona</option><option v-for="item in metodosPago" :key="item.id_metodo_pago" :value="item.id_metodo_pago">{{ item.nombre }}</option></select></label>
-            <label>Cliente (opcional)<select v-model="forms.venta.id_cliente"><option value="">Público general</option><option v-for="item in clientes" :key="item.id_cliente" :value="item.id_cliente">{{ item.nombre }}</option></select></label>
-            <div class="details-heading"><h3>Productos vendidos</h3><button class="link-button add-button" type="button" @click="addSaleDetail">+ Agregar producto</button></div>
-            <div v-for="(detalle, index) in forms.venta.detalles" :key="index" class="detail-card">
-              <div class="detail-card-heading"><strong>Detalle {{ index + 1 }}</strong><button v-if="forms.venta.detalles.length > 1" class="link-button" type="button" @click="removeSaleDetail(index)">Eliminar</button></div>
-              <label>Variante<select v-model="detalle.id_variante" required><option value="" disabled>Selecciona</option><option v-for="item in variantes" :key="item.id_variante" :value="item.id_variante">{{ item.productos?.nombre || item.id_producto }} - {{ item.tamano }}</option></select></label>
-              <label>Cantidad<input v-model.number="detalle.cantidad" min="1" required type="number" step="1" /></label>
-              <div class="details-heading compact"><h3>Extras</h3><button class="link-button add-button" type="button" @click="addSaleExtra(detalle)">+ Agregar extra</button></div>
-              <div v-for="(extra, extraIndex) in detalle.extras" :key="extraIndex" class="extra-row">
-                <select v-model="extra.id_extra"><option value="">Sin extra</option><option v-for="item in extras" :key="item.id_extra" :value="item.id_extra">{{ item.nombre }}</option></select>
-                <input v-model.number="extra.cantidad" min="1" type="number" step="1" aria-label="Cantidad del extra" />
-                <button v-if="detalle.extras.length > 1" class="link-button" type="button" @click="removeSaleExtra(detalle, extraIndex)">×</button>
+
+          <aside class="panel pos-ticket">
+            <div class="panel-heading">
+              <div><p class="eyebrow">Ticket actual</p><h2>Venta</h2></div>
+              <span class="count">{{ forms.venta.detalles.length }}</span>
+            </div>
+
+            <label>Método de pago
+              <select v-model="forms.venta.id_metodo_pago" required>
+                <option value="" disabled>Selecciona</option>
+                <option v-for="item in metodosPago" :key="item.id_metodo_pago" :value="item.id_metodo_pago">{{ item.nombre }}</option>
+              </select>
+            </label>
+            <label>Cliente (opcional)
+              <select v-model="forms.venta.id_cliente">
+                <option value="">Público general</option>
+                <option v-for="item in clientes" :key="item.id_cliente" :value="item.id_cliente">{{ item.nombre }}</option>
+              </select>
+            </label>
+
+            <div class="ticket-lines">
+              <div v-if="!forms.venta.detalles.length" class="empty-state">Selecciona productos del catálogo.</div>
+              <div
+                v-for="(detalle, index) in forms.venta.detalles"
+                :key="`${detalle.id_variante}-${index}`"
+                class="ticket-line"
+                :class="{ selected: selectedVariantIndex === index }"
+                @click="selectedVariantIndex = index"
+              >
+                <div class="ticket-line-main">
+                  <button class="quantity-button" type="button" @click.stop="changeTicketQuantity(index, -1)">−</button>
+                  <strong>{{ detalle.cantidad }}</strong>
+                  <button class="quantity-button" type="button" @click.stop="changeTicketQuantity(index, 1)">+</button>
+                  <div>
+                    <b>{{ variantProductName(findVariant(detalle.id_variante) || {}) }}</b>
+                    <span>{{ findVariant(detalle.id_variante)?.tamano || 'Sin tamaño' }}</span>
+                  </div>
+                  <button class="remove-button" type="button" @click.stop="removeTicketDetail(index)">×</button>
+                </div>
+                <div v-for="(extra, extraIndex) in detalle.extras" :key="extraIndex" class="ticket-extra">
+                  <span>+ {{ extra.cantidad }} × {{ findExtra(extra.id_extra)?.nombre || 'Extra' }}</span>
+                  <button type="button" @click.stop="removeExtraFromDetail(index, extraIndex)">×</button>
+                </div>
               </div>
             </div>
+
             <label class="checkbox-label"><input v-model="forms.venta.consumo_local" type="checkbox" /> Consumo local</label>
             <label class="checkbox-label"><input v-model="forms.venta.requiere_nota" type="checkbox" /> Requiere nota</label>
             <label v-if="forms.venta.requiere_nota">Folio de nota<input v-model.trim="forms.venta.folio_nota" required placeholder="A-000123" /></label>
-            <button class="button primary" type="submit" :disabled="loading">Registrar venta</button>
-          </form>
+
+            <div class="ticket-total"><span>Total</span><strong>{{ ticketSubtotal().toFixed(2) }}</strong></div>
+
+            <div v-if="showPayment" class="payment-box">
+              <label>Pago recibido<input v-model.number="cashReceived" min="0" type="number" step="0.01" placeholder="0.00" /></label>
+              <div class="change-row"><span>Cambio</span><strong>{{ ticketChange().toFixed(2) }}</strong></div>
+            </div>
+
+            <div class="ticket-actions">
+              <button class="button secondary" type="button" :disabled="loading" @click="saveTicket">Guardar ticket</button>
+              <button v-if="!showPayment" class="button primary" type="button" :disabled="loading" @click="openPayment">Cobrar</button>
+              <button v-else class="button primary" type="button" :disabled="loading" @click="createSale">Confirmar cobro</button>
+            </div>
+
+            <div v-if="savedTickets.length" class="saved-tickets">
+              <div class="details-heading"><h3>Tickets guardados</h3><span class="count">{{ savedTickets.length }}</span></div>
+              <div v-for="ticket in savedTickets" :key="ticket.id" class="saved-ticket">
+                <div><strong>{{ ticket.venta.detalles.length }} producto(s)</strong><span>{{ new Date(ticket.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }}</span></div>
+                <button class="link-button" type="button" @click="restoreSavedTicket(ticket)">Recuperar</button>
+                <button class="remove-button" type="button" @click="deleteSavedTicket(ticket.id)">×</button>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section v-else-if="activeSection === 'tickets'" class="content-section">
+        <div class="panel">
+          <div class="panel-heading"><div><p class="eyebrow">Historial</p><h2>Ventas registradas</h2></div><span class="count">{{ ventas.length }}</span></div>
+          <div v-if="ventas.length" class="table-wrap">
+            <table><thead><tr><th>Fecha</th><th>Cliente</th><th>Detalle</th><th>Total</th></tr></thead>
+              <tbody>
+                <tr v-for="venta in ventas" :key="venta.id_venta">
+                  <td>{{ venta.fecha || venta.created_at }}</td>
+                  <td>{{ venta.clientes?.nombre || venta.cliente?.nombre || venta.id_cliente || 'Público general' }}</td>
+                  <td>
+                    <div v-if="saleDetails(venta).length" class="sale-details">
+                      <div v-for="(detalle, detailIndex) in saleDetails(venta)" :key="detailIndex">
+                        <strong>{{ detalle.cantidad }} × {{ saleProductName(detalle) }}</strong>
+                        <span>{{ saleVariantSize(detalle) }}</span>
+                        <small v-if="saleExtras(detalle).length">
+                          Extras:
+                          {{ saleExtras(detalle).map((extra) => `${extra.cantidad} × ${saleExtraName(extra)}`).join(', ') }}
+                        </small>
+                      </div>
+                    </div>
+                    <span v-else class="muted">Sin detalle</span>
+                  </td>
+                  <td>{{ venta.total }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p v-else class="empty-state">No hay ventas registradas.</p>
         </div>
       </section>
     </main>
@@ -878,6 +1132,41 @@ td:last-child, th:last-child { padding-right: 0; }
 .sale-details > div { display: grid; gap: 2px; }
 .sale-details span, .sale-details small { color: #78827d; font-size: 11px; }
 .sale-details small { line-height: 1.4; }
+.pos-layout { display: grid; grid-template-columns: minmax(0, 1fr) 330px; align-items: start; gap: 22px; }
+.pos-catalog { min-height: 620px; }
+.pos-ticket { position: sticky; top: 24px; display: grid; gap: 12px; }
+.product-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.product-card { display: grid; gap: 5px; min-height: 112px; padding: 16px; border: 1px solid #dde4df; border-radius: 10px; background: #fafcfb; color: #263238; text-align: left; }
+.product-card:hover { border-color: #719681; background: #f1f6f3; }
+.product-card strong { font-size: 14px; }
+.product-card span { color: #78827d; font-size: 12px; }
+.product-card b { margin-top: auto; color: #304d42; font-size: 15px; }
+.extras-section { margin-top: 24px; padding-top: 18px; border-top: 1px solid #edf0ed; }
+.extra-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+.extra-card { display: flex; justify-content: space-between; gap: 8px; min-height: 48px; padding: 10px 12px; border: 1px solid #e5e9e5; border-radius: 8px; background: #fff; color: #53635b; font-size: 12px; text-align: left; }
+.extra-card:hover { border-color: #719681; }
+.ticket-lines { display: grid; max-height: 270px; gap: 7px; overflow-y: auto; }
+.ticket-line { padding: 9px; border: 1px solid #edf0ed; border-radius: 8px; background: #fafcfb; cursor: pointer; }
+.ticket-line.selected { border-color: #719681; background: #f2f6f3; }
+.ticket-line-main { display: grid; grid-template-columns: 24px 18px 24px minmax(0, 1fr) 20px; align-items: center; gap: 4px; }
+.ticket-line-main > div { display: grid; min-width: 0; gap: 2px; }
+.ticket-line-main b { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.ticket-line-main span { color: #78827d; font-size: 11px; }
+.quantity-button, .remove-button { display: grid; width: 24px; height: 24px; padding: 0; place-items: center; border: 0; border-radius: 50%; background: #edf3ef; color: #53635b; }
+.remove-button { margin-left: auto; background: transparent; color: #a2584c; }
+.ticket-extra { display: flex; justify-content: space-between; align-items: center; margin: 5px 0 0 70px; color: #78827d; font-size: 10px; }
+.ticket-extra button { border: 0; background: transparent; color: #a2584c; }
+.ticket-total { display: flex; justify-content: space-between; align-items: center; padding: 13px 0 5px; border-top: 1px solid #edf0ed; }
+.ticket-total strong { color: #304d42; font-size: 22px; }
+.payment-box { display: grid; gap: 7px; padding: 12px; border-radius: 8px; background: #f4f6f4; }
+.change-row { display: flex; justify-content: space-between; color: #53635b; font-size: 13px; }
+.change-row strong { color: #304d42; }
+.ticket-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ticket-actions .button { margin: 0; }
+.saved-tickets { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid #edf0ed; }
+.saved-ticket { display: grid; grid-template-columns: minmax(0, 1fr) auto 20px; align-items: center; gap: 7px; }
+.saved-ticket > div { display: grid; font-size: 11px; }
+.saved-ticket span { color: #89938e; }
 .tag { display: inline-block; padding: 4px 8px; border-radius: 12px; background: #eaf3ec; color: #4e835e; font-size: 11px; font-weight: 600; }
 .tag.warning { background: #fbf0e5; color: #ad7448; }
 .empty-state { margin: 0; padding: 25px 0 5px; color: #89938e; font-size: 13px; text-align: center; }
@@ -906,6 +1195,9 @@ td:last-child, th:last-child { padding-right: 0; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .section-grid { grid-template-columns: 1fr; }
   .two-panels { grid-template-columns: 1fr; }
+  .pos-layout { grid-template-columns: 1fr; }
+  .pos-ticket { position: static; }
+  .product-grid, .extra-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 500px) {
@@ -917,5 +1209,7 @@ td:last-child, th:last-child { padding-right: 0; }
   .form-row { grid-template-columns: 1fr; }
   .inline-form { flex-wrap: wrap; }
   .extra-row { grid-template-columns: minmax(0, 1fr) 60px 18px; }
+  .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .extra-grid { grid-template-columns: 1fr; }
 }
 </style>
