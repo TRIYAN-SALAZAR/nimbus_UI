@@ -47,7 +47,7 @@ La interfaz incluye navegación y conexión con los siguientes módulos:
 
 - Resumen con estado de conexión y estadísticas.
 - Productos.
-- Variantes.
+- Productos y variantes en un catálogo combinado.
 - Extras.
 - Insumos.
 - Stock y alertas de reabastecimiento.
@@ -60,6 +60,8 @@ La interfaz incluye navegación y conexión con los siguientes módulos:
 - Tickets con historial de ventas.
 
 Los formularios disponibles permiten crear productos, variantes, extras, insumos, proveedores y clientes. También permiten configurar recetas, registrar compras y registrar ventas. La administración de métodos y orígenes de pago está oculta en la navegación porque actualmente se utilizan catálogos definidos; sus datos siguen disponibles para las operaciones.
+
+La sección de Productos combina la consulta de productos y variantes en una tabla que muestra nombre, categoría, variante abreviada, precio y estado. Una pestaña independiente conserva los formularios separados para crear productos y variantes.
 
 ## Compras y ventas con múltiples detalles
 

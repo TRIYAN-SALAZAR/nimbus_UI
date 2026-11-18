@@ -5,7 +5,6 @@ import { apiFetch, getApiUrl } from './services/api'
 const sections = [
   { id: 'resumen', label: 'Resumen', icon: '⌂' },
   { id: 'productos', label: 'Productos', icon: 'P' },
-  { id: 'variantes', label: 'Variantes', icon: 'V' },
   { id: 'extras', label: 'Extras', icon: 'E' },
   { id: 'insumos', label: 'Insumos', icon: 'I' },
   { id: 'stock', label: 'Stock', icon: 'S' },
@@ -38,6 +37,7 @@ const savedTickets = ref([])
 const cashReceived = ref('')
 const showPayment = ref(false)
 const selectedVariantIndex = ref(0)
+const catalogView = ref('catalogo')
 const recetaSeleccionada = ref({ tipo: 'variantes', id: '' })
 const recetaDetalle = ref([])
 
@@ -105,6 +105,28 @@ function saleExtraName(extra) {
   return item.nombre || `Extra ${extra.id_extra}`
 }
 
+function variantProductName(variante) {
+  return variante.productos?.nombre || variante.producto?.nombre || productos.value.find(
+    (item) => Number(item.id_producto) === Number(variante.id_producto),
+  )?.nombre || `Producto ${variante.id_producto}`
+}
+
+function variantCategory(variante) {
+  return variante.productos?.categoria ||
+    variante.producto?.categoria ||
+    productos.value.find((item) => Number(item.id_producto) === Number(variante.id_producto))?.categoria ||
+    'Sin categoría'
+}
+
+function variantCode(tamano) {
+  const normalized = String(tamano || '').trim().toLocaleLowerCase('es')
+  if (normalized === 'grande' || normalized === 'large' || normalized === 'g') return 'G'
+  if (normalized === 'mediano' || normalized === 'medium' || normalized === 'm') return 'M'
+  if (normalized === 'pequeño' || normalized === 'pequeno' || normalized === 'chico' ||
+    normalized === 'sencillo' || normalized === 'small' || normalized === 's') return 'S'
+  return String(tamano || '?').trim().charAt(0).toLocaleUpperCase('es') || '?'
+}
+
 function ingredientName(recipe) {
   const related = recipe.insumo || recipe.insumos
   if (related?.nombre) return related.nombre
@@ -158,10 +180,6 @@ function restoreSavedTickets() {
 
 function persistSavedTickets() {
   localStorage.setItem(savedTicketsStorageKey(), JSON.stringify(savedTickets.value))
-}
-
-function variantProductName(variante) {
-  return variante.productos?.nombre || variante.producto?.nombre || `Producto ${variante.id_producto}`
 }
 
 function addVariantToTicket(variante) {
@@ -655,63 +673,48 @@ onMounted(() => {
       </section>
 
       <section v-else-if="activeSection === 'productos'" class="content-section">
-        <div class="section-grid">
-          <div class="panel">
-            <div class="panel-heading">
-              <div>
-                <p class="eyebrow">Catálogo</p>
-                <h2>Productos activos</h2>
-              </div>
-              <span class="count">{{ productos.length }}</span>
-            </div>
-            <div v-if="productos.length" class="table-wrap">
-              <table>
-                <thead><tr><th>Nombre</th><th>Categoría</th><th>Estado</th></tr></thead>
-                <tbody>
-                  <tr v-for="producto in productos" :key="producto.id_producto">
-                    <td>{{ producto.nombre }}</td>
-                    <td>{{ producto.categoria || '—' }}</td>
-                    <td><span class="tag">Activo</span></td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <p v-else class="empty-state">No hay productos para mostrar.</p>
-          </div>
+        <div class="tab-bar">
+          <button class="tab-button" :class="{ active: catalogView === 'catalogo' }" type="button" @click="catalogView = 'catalogo'">Catálogo combinado</button>
+          <button class="tab-button" :class="{ active: catalogView === 'nuevo' }" type="button" @click="catalogView = 'nuevo'">Agregar registros</button>
+        </div>
 
+        <div v-if="catalogView === 'catalogo'" class="panel">
+          <div class="panel-heading">
+            <div><p class="eyebrow">Productos y variantes</p><h2>Catálogo combinado</h2></div>
+            <span class="count">{{ variantes.length }}</span>
+          </div>
+          <div v-if="variantes.length" class="table-wrap">
+            <table>
+              <thead><tr><th>Producto</th><th>Categoría</th><th>Variante</th><th>Precio</th><th>Estado</th></tr></thead>
+              <tbody>
+                <tr v-for="variante in variantes" :key="variante.id_variante">
+                  <td><strong>{{ variantProductName(variante) }}</strong></td>
+                  <td>{{ variantCategory(variante) }}</td>
+                  <td>
+                    <div class="variant-format">
+                      <span class="variant-code">{{ variantCode(variante.tamano) }}</span>
+                      <span>{{ variante.tamano || 'Sin tamaño' }}</span>
+                    </div>
+                  </td>
+                  <td><strong>{{ Number(variante.precio_actual).toFixed(2) }}</strong></td>
+                  <td><span class="tag">{{ variante.activo === false ? 'Inactivo' : 'Activo' }}</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p v-else class="empty-state">No hay productos con variantes para mostrar.</p>
+        </div>
+
+        <div v-else class="section-grid">
           <form class="panel form-panel" @submit.prevent="createProducto">
-            <p class="eyebrow">Nuevo registro</p>
+            <p class="eyebrow">Nuevo producto</p>
             <h2>Agregar producto</h2>
             <label>Nombre<input v-model.trim="forms.producto.nombre" required placeholder="Latte" /></label>
             <label>Categoría<input v-model.trim="forms.producto.categoria" placeholder="Café caliente" /></label>
             <button class="button primary" type="submit" :disabled="loading">Guardar producto</button>
           </form>
-        </div>
-      </section>
-
-      <section v-else-if="activeSection === 'variantes'" class="content-section">
-        <div class="section-grid">
-          <div class="panel">
-            <div class="panel-heading">
-              <div><p class="eyebrow">Catálogo</p><h2>Variantes</h2></div>
-              <span class="count">{{ variantes.length }}</span>
-            </div>
-            <div v-if="variantes.length" class="table-wrap">
-              <table>
-                <thead><tr><th>Producto</th><th>Tamaño</th><th>Precio</th></tr></thead>
-                <tbody>
-                  <tr v-for="variante in variantes" :key="variante.id_variante">
-                    <td>{{ variante.productos?.nombre || variante.id_producto }}</td>
-                    <td>{{ variante.tamano }}</td>
-                    <td>{{ variante.precio_actual }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <p v-else class="empty-state">No hay variantes para mostrar.</p>
-          </div>
           <form class="panel form-panel" @submit.prevent="createVariant">
-            <p class="eyebrow">Nuevo registro</p><h2>Agregar variante</h2>
+            <p class="eyebrow">Nueva variante</p><h2>Agregar variante</h2>
             <label>Producto
               <select v-model="forms.variante.id_producto" required>
                 <option value="" disabled>Selecciona un producto</option>
@@ -1216,6 +1219,8 @@ td:last-child, th:last-child { padding-right: 0; }
 .saved-ticket > div { display: grid; font-size: 11px; }
 .saved-ticket span { color: #89938e; }
 .tag { display: inline-block; padding: 4px 8px; border-radius: 12px; background: #eaf3ec; color: #4e835e; font-size: 11px; font-weight: 600; }
+.variant-format { display: flex; align-items: center; gap: 8px; }
+.variant-code { display: inline-grid; width: 30px; height: 30px; place-items: center; border: 1px solid #cfd7d2; border-radius: 7px; background: #edf1ee; color: #405149; font-size: 12px; font-weight: 800; }
 .tag.warning { background: #fbf0e5; color: #ad7448; }
 .empty-state { margin: 0; padding: 25px 0 5px; color: #89938e; font-size: 13px; text-align: center; }
 .two-panels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
