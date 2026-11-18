@@ -11,7 +11,6 @@ const sections = [
   { id: 'stock', label: 'Stock', icon: 'S' },
   { id: 'proveedores', label: 'Proveedores', icon: 'Pr' },
   { id: 'clientes', label: 'Clientes', icon: 'C' },
-  { id: 'pagos', label: 'Pagos', icon: '$' },
   { id: 'recetas', label: 'Recetas', icon: 'R' },
   { id: 'compras', label: 'Compras', icon: 'Co' },
   { id: 'ventas', label: 'Ventas', icon: 'Ve' },
@@ -33,6 +32,7 @@ const clientes = ref([])
 const metodosPago = ref([])
 const origenesPago = ref([])
 const compras = ref([])
+const purchaseView = ref('registradas')
 const ventas = ref([])
 const savedTickets = ref([])
 const cashReceived = ref('')
@@ -56,7 +56,7 @@ const forms = reactive({
     notas: '',
     id_origen: '',
     id_proveedor: '',
-    detalles: [{ id_insumo: '', cantidad: '', precio: '' }],
+    detalles: [],
   },
   venta: {
     consumo_local: true,
@@ -103,6 +103,45 @@ function saleExtras(detail) {
 function saleExtraName(extra) {
   const item = extra.extra || extra.extras || {}
   return item.nombre || `Extra ${extra.id_extra}`
+}
+
+function ingredientName(recipe) {
+  const related = recipe.insumo || recipe.insumos
+  if (related?.nombre) return related.nombre
+  return insumos.value.find((item) => Number(item.id_insumo) === Number(recipe.id_insumo))?.nombre || 'Insumo no encontrado'
+}
+
+function addInsumoToPurchase(insumo) {
+  const existingIndex = forms.compra.detalles.findIndex(
+    (detalle) => Number(detalle.id_insumo) === Number(insumo.id_insumo),
+  )
+
+  if (existingIndex >= 0) {
+    forms.compra.detalles[existingIndex].cantidad = Number(forms.compra.detalles[existingIndex].cantidad || 0) + 1
+  } else {
+    forms.compra.detalles.push({
+      id_insumo: insumo.id_insumo,
+      cantidad: 1,
+      precio: '',
+    })
+  }
+  clearFeedback()
+}
+
+function removePurchaseItem(index) {
+  forms.compra.detalles.splice(index, 1)
+}
+
+function changePurchaseQuantity(index, amount) {
+  const detalle = forms.compra.detalles[index]
+  detalle.cantidad = Math.max(0.001, Number(detalle.cantidad || 0) + amount)
+}
+
+function purchaseTotal() {
+  return forms.compra.detalles.reduce(
+    (total, detalle) => total + Number(detalle.cantidad || 0) * Number(detalle.precio || 0),
+    0,
+  )
 }
 
 function savedTicketsStorageKey() {
@@ -338,14 +377,6 @@ async function createProvider() {
   await submitForm('proveedores', forms.proveedor, 'Proveedor creado correctamente.')
 }
 
-async function createPaymentMethod() {
-  await submitForm('metodos-pago', forms.metodoPago, 'Método de pago creado correctamente.')
-}
-
-async function createPaymentOrigin() {
-  await submitForm('origenes-pago', forms.origenPago, 'Origen de pago creado correctamente.')
-}
-
 async function loadRecipe() {
   clearFeedback()
   const { tipo, id } = recetaSeleccionada.value
@@ -404,6 +435,14 @@ async function deleteRecipe(idInsumo) {
 
 async function createPurchase() {
   const form = forms.compra
+  if (!form.detalles.length) {
+    error.value = 'Agrega al menos un insumo a la compra.'
+    return
+  }
+  if (!form.id_proveedor || !form.id_origen) {
+    error.value = 'Selecciona proveedor y origen de pago.'
+    return
+  }
   const payload = {
     fecha: form.fecha,
     notas: form.notas || undefined,
@@ -418,7 +457,10 @@ async function createPurchase() {
 
   await registerOperation('/api/compras', payload, 'Compra registrada correctamente.')
   form.notas = ''
-  form.detalles = [{ id_insumo: '', cantidad: '', precio: '' }]
+  form.id_proveedor = ''
+  form.id_origen = ''
+  form.detalles = []
+  purchaseView.value = 'registradas'
 }
 
 async function createSale() {
@@ -463,14 +505,6 @@ async function registerOperation(endpoint, payload, successMessage) {
   } finally {
     loading.value = false
   }
-}
-
-function addPurchaseDetail() {
-  forms.compra.detalles.push({ id_insumo: '', cantidad: '', precio: '' })
-}
-
-function removePurchaseDetail(index) {
-  if (forms.compra.detalles.length > 1) forms.compra.detalles.splice(index, 1)
 }
 
 function saveTicket() {
@@ -816,28 +850,6 @@ onMounted(() => {
         </div>
       </section>
 
-      <section v-else-if="activeSection === 'pagos'" class="content-section">
-        <div class="two-panels">
-          <div class="panel">
-            <div class="panel-heading"><div><p class="eyebrow">Ventas</p><h2>Métodos de pago</h2></div><span class="count">{{ metodosPago.length }}</span></div>
-            <ul class="simple-list"><li v-for="metodo in metodosPago" :key="metodo.id_metodo_pago">{{ metodo.nombre }}</li></ul>
-            <form class="inline-form" @submit.prevent="createPaymentMethod">
-              <input v-model.trim="forms.metodoPago.nombre" required placeholder="Nuevo método" />
-              <button class="button primary" type="submit" :disabled="loading">Agregar</button>
-            </form>
-          </div>
-          <div class="panel">
-            <div class="panel-heading"><div><p class="eyebrow">Compras y ventas</p><h2>Orígenes de pago</h2></div><span class="count">{{ origenesPago.length }}</span></div>
-            <ul class="simple-list"><li v-for="origen in origenesPago" :key="origen.id_origen">{{ origen.nombre }} <span class="muted">{{ origen.tipo }}</span></li></ul>
-            <form class="inline-form" @submit.prevent="createPaymentOrigin">
-              <input v-model.trim="forms.origenPago.nombre" required placeholder="Nombre" />
-              <input v-model.trim="forms.origenPago.tipo" required placeholder="Tipo" />
-              <button class="button primary" type="submit" :disabled="loading">Agregar</button>
-            </form>
-          </div>
-        </div>
-      </section>
-
       <section v-else-if="activeSection === 'recetas'" class="content-section">
         <div class="section-grid">
           <div class="panel">
@@ -858,9 +870,10 @@ onMounted(() => {
               </label>
             </div>
             <div v-if="recetaDetalle.length" class="table-wrap">
-              <table><thead><tr><th>Insumo</th><th>Cantidad</th><th></th></tr></thead>
+              <table><thead><tr><th>ID</th><th>Insumo</th><th>Cantidad gastada</th><th></th></tr></thead>
                 <tbody><tr v-for="receta in recetaDetalle" :key="receta.id_insumo">
-                  <td>{{ receta.insumos?.nombre || receta.nombre || receta.id_insumo }}</td>
+                  <td>{{ receta.id_insumo }}</td>
+                  <td>{{ ingredientName(receta) }}</td>
                   <td>{{ receta.cantidad_consumida }}</td>
                   <td><button class="link-button" type="button" @click="deleteRecipe(receta.id_insumo)">Eliminar</button></td>
                 </tr></tbody>
@@ -879,28 +892,60 @@ onMounted(() => {
       </section>
 
       <section v-else-if="activeSection === 'compras'" class="content-section">
-        <div class="section-grid">
-          <div class="panel">
-            <div class="panel-heading"><div><p class="eyebrow">Operaciones</p><h2>Compras registradas</h2></div><span class="count">{{ compras.length }}</span></div>
-            <div v-if="compras.length" class="table-wrap">
-              <table><thead><tr><th>Fecha</th><th>Proveedor</th><th>Total</th></tr></thead>
-                <tbody><tr v-for="compra in compras" :key="compra.id_compra"><td>{{ compra.fecha }}</td><td>{{ compra.proveedores?.nombre || compra.id_proveedor }}</td><td>{{ compra.total }}</td></tr></tbody>
-              </table>
-            </div>
-            <p v-else class="empty-state">No hay compras para mostrar.</p>
+        <div class="tab-bar">
+          <button class="tab-button" :class="{ active: purchaseView === 'registradas' }" type="button" @click="purchaseView = 'registradas'">Compras registradas</button>
+          <button class="tab-button" :class="{ active: purchaseView === 'nueva' }" type="button" @click="purchaseView = 'nueva'">Nueva compra</button>
+        </div>
+
+        <div v-if="purchaseView === 'registradas'" class="panel">
+          <div class="panel-heading"><div><p class="eyebrow">Operaciones</p><h2>Compras registradas</h2></div><span class="count">{{ compras.length }}</span></div>
+          <div v-if="compras.length" class="table-wrap">
+            <table><thead><tr><th>Fecha</th><th>Proveedor</th><th>Total</th></tr></thead>
+              <tbody><tr v-for="compra in compras" :key="compra.id_compra"><td>{{ compra.fecha }}</td><td>{{ compra.proveedores?.nombre || compra.proveedor?.nombre || compra.id_proveedor }}</td><td>{{ compra.total }}</td></tr></tbody>
+            </table>
           </div>
-          <form class="panel form-panel" @submit.prevent="createPurchase">
-            <p class="eyebrow">Nueva operación</p><h2>Registrar compra</h2>
+          <p v-else class="empty-state">No hay compras para mostrar.</p>
+        </div>
+
+        <div v-else class="pos-layout">
+          <div class="panel pos-catalog">
+            <div class="panel-heading">
+              <div><p class="eyebrow">Inventario</p><h2>Selecciona insumos</h2></div>
+              <span class="count">{{ insumos.length }}</span>
+            </div>
+            <div v-if="insumos.length" class="product-grid">
+              <button v-for="insumo in insumos" :key="insumo.id_insumo" class="product-card" type="button" @click="addInsumoToPurchase(insumo)">
+                <strong>{{ insumo.nombre }}</strong>
+                <span>ID {{ insumo.id_insumo }} · {{ insumo.unidad_medida }}</span>
+                <b>Agregar</b>
+              </button>
+            </div>
+            <p v-else class="empty-state">No hay insumos disponibles.</p>
+          </div>
+
+          <form class="panel pos-ticket form-panel" @submit.prevent="createPurchase">
+            <div class="panel-heading"><div><p class="eyebrow">Nueva operación</p><h2>Compra</h2></div><span class="count">{{ forms.compra.detalles.length }}</span></div>
             <label>Fecha<input v-model="forms.compra.fecha" required type="date" /></label>
             <label>Proveedor<select v-model="forms.compra.id_proveedor" required><option value="" disabled>Selecciona</option><option v-for="item in proveedores" :key="item.id_proveedor" :value="item.id_proveedor">{{ item.nombre }}</option></select></label>
             <label>Origen de pago<select v-model="forms.compra.id_origen" required><option value="" disabled>Selecciona</option><option v-for="item in origenesPago" :key="item.id_origen" :value="item.id_origen">{{ item.nombre }}</option></select></label>
-            <div class="details-heading"><h3>Insumos comprados</h3><button class="link-button add-button" type="button" @click="addPurchaseDetail">+ Agregar insumo</button></div>
-            <div v-for="(detalle, index) in forms.compra.detalles" :key="index" class="detail-card">
-              <div class="detail-card-heading"><strong>Detalle {{ index + 1 }}</strong><button v-if="forms.compra.detalles.length > 1" class="link-button" type="button" @click="removePurchaseDetail(index)">Eliminar</button></div>
-              <label>Insumo<select v-model="detalle.id_insumo" required><option value="" disabled>Selecciona</option><option v-for="item in insumos" :key="item.id_insumo" :value="item.id_insumo">{{ item.nombre }}</option></select></label>
-              <div class="form-row"><label>Cantidad<input v-model.number="detalle.cantidad" min="0.000001" required type="number" step="0.001" /></label><label>Precio unitario<input v-model.number="detalle.precio" min="0" required type="number" step="0.01" /></label></div>
+            <div class="ticket-lines purchase-lines">
+              <div v-if="!forms.compra.detalles.length" class="empty-state">Selecciona insumos del catálogo.</div>
+              <div v-for="(detalle, index) in forms.compra.detalles" :key="`${detalle.id_insumo}-${index}`" class="ticket-line">
+                <div class="ticket-line-main">
+                  <button class="quantity-button" type="button" @click="changePurchaseQuantity(index, -1)">−</button>
+                  <strong>{{ detalle.cantidad }}</strong>
+                  <button class="quantity-button" type="button" @click="changePurchaseQuantity(index, 1)">+</button>
+                  <div>
+                    <b>{{ insumos.find((item) => Number(item.id_insumo) === Number(detalle.id_insumo))?.nombre || `Insumo ${detalle.id_insumo}` }}</b>
+                    <span>ID {{ detalle.id_insumo }}</span>
+                  </div>
+                  <button class="remove-button" type="button" @click="removePurchaseItem(index)">×</button>
+                </div>
+                <label>Precio unitario<input v-model.number="detalle.precio" min="0" required type="number" step="0.01" placeholder="0.00" /></label>
+              </div>
             </div>
             <label>Notas<input v-model.trim="forms.compra.notas" placeholder="Compra semanal" /></label>
+            <div class="ticket-total"><span>Total estimado</span><strong>{{ purchaseTotal().toFixed(2) }}</strong></div>
             <button class="button primary" type="submit" :disabled="loading">Registrar compra</button>
           </form>
         </div>
@@ -1083,6 +1128,9 @@ h1, h2, p { margin-top: 0; }
 h1 { margin-bottom: 0; font-size: 28px; letter-spacing: -.03em; }
 h2 { margin-bottom: 9px; font-size: 19px; letter-spacing: -.02em; }
 .content-section { display: grid; gap: 22px; }
+.tab-bar { display: flex; gap: 6px; padding: 5px; border-radius: 9px; background: #e9eeea; }
+.tab-button { padding: 10px 15px; border: 0; border-radius: 7px; background: transparent; color: #68736e; font-size: 13px; font-weight: 600; }
+.tab-button.active { background: #fff; color: #304d42; box-shadow: 0 1px 3px #cfd8d1; }
 .welcome-card { display: flex; align-items: center; justify-content: space-between; min-height: 180px; padding: 30px 34px; border-radius: 14px; background: #304d42; color: #fff; }
 .welcome-card .eyebrow { color: #bdcfc5; }
 .welcome-card h2 { margin-bottom: 10px; font-size: 26px; }

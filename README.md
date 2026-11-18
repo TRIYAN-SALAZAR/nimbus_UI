@@ -59,7 +59,7 @@ La interfaz incluye navegación y conexión con los siguientes módulos:
 - Ventas.
 - Tickets con historial de ventas.
 
-Los formularios disponibles permiten crear productos, variantes, extras, insumos, proveedores, clientes, métodos de pago y orígenes de pago. También permiten configurar recetas, registrar compras y registrar ventas.
+Los formularios disponibles permiten crear productos, variantes, extras, insumos, proveedores y clientes. También permiten configurar recetas, registrar compras y registrar ventas. La administración de métodos y orígenes de pago está oculta en la navegación porque actualmente se utilizan catálogos definidos; sus datos siguen disponibles para las operaciones.
 
 ## Compras y ventas con múltiples detalles
 
@@ -95,6 +95,8 @@ El frontend envía estos arreglos dentro de `detalles`. Los precios de venta y e
 La sección de ventas presenta las variantes como tarjetas seleccionables y mantiene el ticket en un panel lateral. Permite ajustar cantidades, agregar extras, calcular el cambio al recibir efectivo y guardar tickets pendientes en `localStorage` sin enviarlos todavía al backend.
 
 Los tickets pendientes pueden recuperarse o eliminarse desde el navegador. Las ventas confirmadas se muestran en la nueva sección `Tickets`.
+
+La sección de compras tiene dos vistas: `Compras registradas` y `Nueva compra`. En la nueva compra se seleccionan insumos desde tarjetas, se agregan cantidades y se captura el precio unitario de cada detalle antes de enviarlo al backend.
 
 ## Estructura principal
 
