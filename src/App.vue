@@ -37,7 +37,6 @@ const savedTickets = ref([])
 const cashReceived = ref('')
 const showPayment = ref(false)
 const selectedVariantIndex = ref(0)
-const catalogView = ref('catalogo')
 const recetaSeleccionada = ref({ tipo: 'variantes', id: '' })
 const recetaDetalle = ref([])
 
@@ -111,13 +110,6 @@ function variantProductName(variante) {
   )?.nombre || `Producto ${variante.id_producto}`
 }
 
-function variantCategory(variante) {
-  return variante.productos?.categoria ||
-    variante.producto?.categoria ||
-    productos.value.find((item) => Number(item.id_producto) === Number(variante.id_producto))?.categoria ||
-    'Sin categoría'
-}
-
 function variantCode(tamano) {
   const normalized = String(tamano || '').trim().toLocaleLowerCase('es')
   if (normalized === 'grande' || normalized === 'large' || normalized === 'g') return 'G'
@@ -126,6 +118,16 @@ function variantCode(tamano) {
     normalized === 'sencillo' || normalized === 'small' || normalized === 's') return 'S'
   return String(tamano || '?').trim().charAt(0).toLocaleUpperCase('es') || '?'
 }
+
+const combinedCatalog = computed(() => productos.value.map((producto) => ({
+  id_producto: producto.id_producto,
+  nombre: producto.nombre,
+  categoria: producto.categoria || 'Sin categoría',
+  activo: producto.activo !== false,
+  variantes: variantes.value.filter(
+    (variante) => Number(variante.id_producto) === Number(producto.id_producto),
+  ),
+})))
 
 function ingredientName(recipe) {
   const related = recipe.insumo || recipe.insumos
@@ -673,58 +675,57 @@ onMounted(() => {
       </section>
 
       <section v-else-if="activeSection === 'productos'" class="content-section">
-        <div class="tab-bar">
-          <button class="tab-button" :class="{ active: catalogView === 'catalogo' }" type="button" @click="catalogView = 'catalogo'">Catálogo combinado</button>
-          <button class="tab-button" :class="{ active: catalogView === 'nuevo' }" type="button" @click="catalogView = 'nuevo'">Agregar registros</button>
-        </div>
-
-        <div v-if="catalogView === 'catalogo'" class="panel">
-          <div class="panel-heading">
-            <div><p class="eyebrow">Productos y variantes</p><h2>Catálogo combinado</h2></div>
-            <span class="count">{{ variantes.length }}</span>
+        <div class="catalog-layout">
+          <div class="panel">
+            <div class="panel-heading">
+              <div><p class="eyebrow">Productos y variantes</p><h2>Catálogo</h2></div>
+              <span class="count">{{ combinedCatalog.length }}</span>
+            </div>
+            <div v-if="combinedCatalog.length" class="table-wrap">
+              <table>
+                <thead><tr><th>Producto</th><th>Categoría</th><th>Tamaño y precio</th><th>Estado</th></tr></thead>
+                <tbody>
+                  <tr v-for="producto in combinedCatalog" :key="producto.id_producto">
+                    <td><strong>{{ producto.nombre }}</strong></td>
+                    <td>{{ producto.categoria }}</td>
+                    <td>
+                      <div v-if="producto.variantes.length" class="variant-price-grid">
+                        <div v-for="variante in producto.variantes" :key="variante.id_variante" class="variant-price">
+                          <span class="variant-code">{{ variantCode(variante.tamano) }}</span>
+                          <strong>{{ Number(variante.precio_actual).toFixed(2) }}</strong>
+                        </div>
+                      </div>
+                      <span v-else class="na-value">N/A</span>
+                    </td>
+                    <td><span class="tag" :class="{ inactive: !producto.activo }">{{ producto.activo ? 'Activo' : 'Inactivo' }}</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p v-else class="empty-state">No hay productos para mostrar.</p>
           </div>
-          <div v-if="variantes.length" class="table-wrap">
-            <table>
-              <thead><tr><th>Producto</th><th>Categoría</th><th>Variante</th><th>Precio</th><th>Estado</th></tr></thead>
-              <tbody>
-                <tr v-for="variante in variantes" :key="variante.id_variante">
-                  <td><strong>{{ variantProductName(variante) }}</strong></td>
-                  <td>{{ variantCategory(variante) }}</td>
-                  <td>
-                    <div class="variant-format">
-                      <span class="variant-code">{{ variantCode(variante.tamano) }}</span>
-                      <span>{{ variante.tamano || 'Sin tamaño' }}</span>
-                    </div>
-                  </td>
-                  <td><strong>{{ Number(variante.precio_actual).toFixed(2) }}</strong></td>
-                  <td><span class="tag">{{ variante.activo === false ? 'Inactivo' : 'Activo' }}</span></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <p v-else class="empty-state">No hay productos con variantes para mostrar.</p>
-        </div>
 
-        <div v-else class="section-grid">
-          <form class="panel form-panel" @submit.prevent="createProducto">
-            <p class="eyebrow">Nuevo producto</p>
-            <h2>Agregar producto</h2>
-            <label>Nombre<input v-model.trim="forms.producto.nombre" required placeholder="Latte" /></label>
-            <label>Categoría<input v-model.trim="forms.producto.categoria" placeholder="Café caliente" /></label>
-            <button class="button primary" type="submit" :disabled="loading">Guardar producto</button>
-          </form>
-          <form class="panel form-panel" @submit.prevent="createVariant">
-            <p class="eyebrow">Nueva variante</p><h2>Agregar variante</h2>
-            <label>Producto
-              <select v-model="forms.variante.id_producto" required>
-                <option value="" disabled>Selecciona un producto</option>
-                <option v-for="producto in productos" :key="producto.id_producto" :value="producto.id_producto">{{ producto.nombre }}</option>
-              </select>
-            </label>
-            <label>Tamaño<input v-model.trim="forms.variante.tamano" required placeholder="Mediano" /></label>
-            <label>Precio actual<input v-model.number="forms.variante.precio_actual" min="0.01" required type="number" step="0.01" /></label>
-            <button class="button primary" type="submit" :disabled="loading">Guardar variante</button>
-          </form>
+          <div class="catalog-forms">
+            <form class="panel form-panel" @submit.prevent="createProducto">
+              <p class="eyebrow">Nuevo producto</p>
+              <h2>Agregar producto</h2>
+              <label>Nombre<input v-model.trim="forms.producto.nombre" required placeholder="Latte" /></label>
+              <label>Categoría<input v-model.trim="forms.producto.categoria" placeholder="Café caliente" /></label>
+              <button class="button primary" type="submit" :disabled="loading">Guardar producto</button>
+            </form>
+            <form class="panel form-panel" @submit.prevent="createVariant">
+              <p class="eyebrow">Nueva variante</p><h2>Agregar variante</h2>
+              <label>Producto
+                <select v-model="forms.variante.id_producto" required>
+                  <option value="" disabled>Selecciona un producto</option>
+                  <option v-for="producto in productos" :key="producto.id_producto" :value="producto.id_producto">{{ producto.nombre }}</option>
+                </select>
+              </label>
+              <label>Tamaño<input v-model.trim="forms.variante.tamano" required placeholder="Mediano" /></label>
+              <label>Precio actual<input v-model.number="forms.variante.precio_actual" min="0.01" required type="number" step="0.01" /></label>
+              <button class="button primary" type="submit" :disabled="loading">Guardar variante</button>
+            </form>
+          </div>
         </div>
       </section>
 
@@ -1219,8 +1220,15 @@ td:last-child, th:last-child { padding-right: 0; }
 .saved-ticket > div { display: grid; font-size: 11px; }
 .saved-ticket span { color: #89938e; }
 .tag { display: inline-block; padding: 4px 8px; border-radius: 12px; background: #eaf3ec; color: #4e835e; font-size: 11px; font-weight: 600; }
+.tag.inactive { background: #edf0ed; color: #6f7973; }
 .variant-format { display: flex; align-items: center; gap: 8px; }
 .variant-code { display: inline-grid; width: 30px; height: 30px; place-items: center; border: 1px solid #cfd7d2; border-radius: 7px; background: #edf1ee; color: #405149; font-size: 12px; font-weight: 800; }
+.catalog-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; align-items: start; gap: 22px; }
+.catalog-forms { display: grid; gap: 22px; }
+.variant-price-grid { display: flex; align-items: center; gap: 8px; }
+.variant-price { display: grid; justify-items: center; gap: 5px; }
+.variant-price strong { color: #53635b; font-size: 12px; }
+.na-value { color: #89938e; font-size: 12px; }
 .tag.warning { background: #fbf0e5; color: #ad7448; }
 .empty-state { margin: 0; padding: 25px 0 5px; color: #89938e; font-size: 13px; text-align: center; }
 .two-panels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
@@ -1250,6 +1258,8 @@ td:last-child, th:last-child { padding-right: 0; }
   .two-panels { grid-template-columns: 1fr; }
   .pos-layout { grid-template-columns: 1fr; }
   .pos-ticket { position: static; }
+  .catalog-layout { grid-template-columns: 1fr; }
+  .catalog-forms { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .product-grid, .extra-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
@@ -1264,5 +1274,6 @@ td:last-child, th:last-child { padding-right: 0; }
   .extra-row { grid-template-columns: minmax(0, 1fr) 60px 18px; }
   .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .extra-grid { grid-template-columns: 1fr; }
+  .catalog-forms { grid-template-columns: 1fr; }
 }
 </style>

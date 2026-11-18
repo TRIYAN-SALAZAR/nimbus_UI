@@ -61,7 +61,7 @@ La interfaz incluye navegación y conexión con los siguientes módulos:
 
 Los formularios disponibles permiten crear productos, variantes, extras, insumos, proveedores y clientes. También permiten configurar recetas, registrar compras y registrar ventas. La administración de métodos y orígenes de pago está oculta en la navegación porque actualmente se utilizan catálogos definidos; sus datos siguen disponibles para las operaciones.
 
-La sección de Productos combina la consulta de productos y variantes en una tabla que muestra nombre, categoría, variante abreviada, precio y estado. Una pestaña independiente conserva los formularios separados para crear productos y variantes.
+La sección de Productos muestra el catálogo a la izquierda y los formularios de producto y variante apilados a la derecha. La tabla agrupa variantes por producto y muestra la abreviatura encima de su precio: por ejemplo, `S` sobre `30.00` y `G` sobre `40.00`. Los productos sin variantes muestran `N/A`.
 
 ## Compras y ventas con múltiples detalles
 
