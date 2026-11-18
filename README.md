@@ -58,6 +58,7 @@ La interfaz incluye navegación y conexión con los siguientes módulos:
 - Compras.
 - Ventas.
 - Tickets con historial de ventas.
+- Reportes financieros de ventas y compras.
 
 Los formularios disponibles permiten crear productos, variantes, extras, insumos, proveedores y clientes. También permiten configurar recetas, registrar compras y registrar ventas. La administración de métodos y orígenes de pago está oculta en la navegación porque actualmente se utilizan catálogos definidos; sus datos siguen disponibles para las operaciones.
 
@@ -66,6 +67,10 @@ La sección de Productos muestra el catálogo a la izquierda y los formularios d
 Los extras también se muestran en la sección Productos mediante una segunda lista. El panel derecho permite cambiar entre formularios de producto, variante y extra sin ocultar el catálogo.
 
 La sección Recetas divide variantes y extras en dos columnas. Cada elemento puede expandirse desde su triángulo para consultar sus insumos; el botón superior `Editar recetas` habilita un editor para agregar o retirar insumos.
+
+## Reportes
+
+La sección `Reportes` consulta `GET /api/reportes/resumen` con un rango opcional de fechas (`YYYY-MM-DD`). Muestra ventas, compras, utilidad bruta, ticket promedio y desgloses por método de pago, producto, proveedor e insumo.
 
 ## Compras y ventas con múltiples detalles
 

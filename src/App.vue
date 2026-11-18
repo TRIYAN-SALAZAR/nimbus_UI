@@ -4,6 +4,7 @@ import { apiFetch, getApiUrl } from './services/api'
 
 const sections = [
   { id: 'resumen', label: 'Resumen', icon: '⌂' },
+  { id: 'reportes', label: 'Reportes', icon: 'R' },
   { id: 'productos', label: 'Productos', icon: 'P' },
   { id: 'insumos', label: 'Insumos', icon: 'I' },
   { id: 'stock', label: 'Stock', icon: 'S' },
@@ -42,6 +43,13 @@ const catalogForm = ref('producto')
 const recipeEditOpen = ref(false)
 const expandedRecipes = ref({})
 const recipeCache = ref({})
+const reportLoading = ref(false)
+const reportError = ref('')
+const report = ref(null)
+const reportFilters = reactive({
+  fecha_desde: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10),
+  fecha_hasta: new Date().toISOString().slice(0, 10),
+})
 
 const forms = reactive({
   producto: { nombre: '', categoria: '' },
@@ -289,6 +297,33 @@ function salePayload(form) {
 function clearFeedback() {
   message.value = ''
   error.value = ''
+}
+
+function formatCurrency(value) {
+  return Number(value || 0).toLocaleString('es-MX', {
+    style: 'currency',
+    currency: 'MXN',
+  })
+}
+
+function reportEntries(value) {
+  return Object.entries(value || {})
+}
+
+async function loadReports() {
+  reportLoading.value = true
+  reportError.value = ''
+  const params = new URLSearchParams()
+  if (reportFilters.fecha_desde) params.set('fecha_desde', reportFilters.fecha_desde)
+  if (reportFilters.fecha_hasta) params.set('fecha_hasta', reportFilters.fecha_hasta)
+
+  try {
+    report.value = await apiFetch(`/api/reportes/resumen?${params.toString()}`)
+  } catch (requestError) {
+    reportError.value = requestError.message
+  } finally {
+    reportLoading.value = false
+  }
 }
 
 async function loadData() {
@@ -626,6 +661,7 @@ function openPayment() {
 function selectSection(section) {
   activeSection.value = section
   clearFeedback()
+  if (section === 'reportes') loadReports()
 }
 
 onMounted(() => {
@@ -712,6 +748,64 @@ onMounted(() => {
           <p class="muted">URL base del backend: <code>{{ getApiUrl() }}</code></p>
           <p class="muted">Configúrala con la variable <code>VITE_API_URL</code> en un archivo <code>.env</code>.</p>
         </div>
+      </section>
+
+      <section v-else-if="activeSection === 'reportes'" class="content-section">
+        <div class="report-toolbar panel">
+          <div>
+            <p class="eyebrow">Análisis financiero</p>
+            <h2>Reportes de ventas y compras</h2>
+          </div>
+          <div class="report-filters">
+            <label>Desde<input v-model="reportFilters.fecha_desde" type="date" /></label>
+            <label>Hasta<input v-model="reportFilters.fecha_hasta" type="date" /></label>
+            <button class="button primary report-button" type="button" :disabled="reportLoading" @click="loadReports">
+              {{ reportLoading ? 'Consultando...' : 'Consultar' }}
+            </button>
+          </div>
+        </div>
+
+        <div v-if="reportError" class="feedback error" role="alert">{{ reportError }}</div>
+        <template v-if="report">
+          <div class="report-stats">
+            <article class="stat-card"><span>Ventas</span><strong>{{ formatCurrency(report.ventas?.total) }}</strong><small>{{ report.ventas?.cantidad || 0 }} operaciones</small></article>
+            <article class="stat-card"><span>Compras</span><strong>{{ formatCurrency(report.compras?.total) }}</strong><small>{{ report.compras?.cantidad || 0 }} operaciones</small></article>
+            <article class="stat-card"><span>Utilidad bruta</span><strong>{{ formatCurrency(report.utilidad_bruta) }}</strong><small>Ventas menos compras</small></article>
+            <article class="stat-card"><span>Ticket promedio</span><strong>{{ formatCurrency(report.ventas?.ticket_promedio) }}</strong><small>Promedio por venta</small></article>
+          </div>
+
+          <div class="report-grid">
+            <div class="panel">
+              <div class="panel-heading"><div><p class="eyebrow">Ventas</p><h2>Desglose por método de pago</h2></div></div>
+              <div v-if="reportEntries(report.ventas?.por_metodo_pago).length" class="report-list">
+                <div v-for="[name, total] in reportEntries(report.ventas?.por_metodo_pago)" :key="name" class="report-row"><span>{{ name }}</span><strong>{{ formatCurrency(total) }}</strong></div>
+              </div>
+              <p v-else class="empty-state">No hay ventas en el periodo.</p>
+            </div>
+            <div class="panel">
+              <div class="panel-heading"><div><p class="eyebrow">Ventas</p><h2>Desglose por producto</h2></div></div>
+              <div v-if="reportEntries(report.ventas?.por_producto).length" class="report-list">
+                <div v-for="[name, total] in reportEntries(report.ventas?.por_producto)" :key="name" class="report-row"><span>{{ name }}</span><strong>{{ formatCurrency(total) }}</strong></div>
+              </div>
+              <p v-else class="empty-state">No hay productos vendidos en el periodo.</p>
+            </div>
+            <div class="panel">
+              <div class="panel-heading"><div><p class="eyebrow">Compras</p><h2>Desglose por proveedor</h2></div></div>
+              <div v-if="reportEntries(report.compras?.por_proveedor).length" class="report-list">
+                <div v-for="[name, total] in reportEntries(report.compras?.por_proveedor)" :key="name" class="report-row"><span>{{ name }}</span><strong>{{ formatCurrency(total) }}</strong></div>
+              </div>
+              <p v-else class="empty-state">No hay compras en el periodo.</p>
+            </div>
+            <div class="panel">
+              <div class="panel-heading"><div><p class="eyebrow">Compras</p><h2>Desglose por insumo</h2></div></div>
+              <div v-if="reportEntries(report.compras?.por_insumo).length" class="report-list">
+                <div v-for="[name, total] in reportEntries(report.compras?.por_insumo)" :key="name" class="report-row"><span>{{ name }}</span><strong>{{ formatCurrency(total) }}</strong></div>
+              </div>
+              <p v-else class="empty-state">No hay insumos comprados en el periodo.</p>
+            </div>
+          </div>
+        </template>
+        <div v-else-if="reportLoading" class="panel empty-state">Cargando reporte...</div>
       </section>
 
       <section v-else-if="activeSection === 'productos'" class="content-section">
@@ -1260,6 +1354,16 @@ h2 { margin-bottom: 9px; font-size: 19px; letter-spacing: -.02em; }
 .stat-card, .panel { padding: 22px; border: 1px solid #e5e9e5; border-radius: 12px; background: #fff; }
 .stat-card span { display: block; color: #7d8983; font-size: 12px; }
 .stat-card strong { display: block; margin-top: 13px; font-size: 27px; color: #304d42; }
+.stat-card small { display: block; margin-top: 7px; color: #89938e; font-size: 11px; }
+.report-toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 22px; }
+.report-toolbar h2 { margin-bottom: 0; }
+.report-filters { display: flex; align-items: flex-end; gap: 10px; }
+.report-button { margin: 0; white-space: nowrap; }
+.report-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.report-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
+.report-list { display: grid; }
+.report-row { display: flex; justify-content: space-between; gap: 14px; padding: 11px 0; border-top: 1px solid #edf0ed; color: #53635b; font-size: 13px; }
+.report-row strong { color: #304d42; }
 .panel-heading { align-items: center; margin-bottom: 22px; }
 .panel-heading .eyebrow { margin-bottom: 5px; }
 .panel-heading h2 { margin-bottom: 0; }
@@ -1390,6 +1494,10 @@ td:last-child, th:last-child { padding-right: 0; }
   .sidebar-footer { justify-content: center; padding: 14px 0 0; font-size: 0; }
   .main-content { padding: 28px 20px; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .report-stats { grid-template-columns: repeat(2, 1fr); }
+  .report-grid { grid-template-columns: 1fr; }
+  .report-toolbar { align-items: stretch; flex-direction: column; }
+  .report-filters { flex-wrap: wrap; }
   .section-grid { grid-template-columns: 1fr; }
   .two-panels { grid-template-columns: 1fr; }
   .pos-layout { grid-template-columns: 1fr; }
@@ -1406,6 +1514,7 @@ td:last-child, th:last-child { padding-right: 0; }
   .welcome-card { padding: 24px; }
   .welcome-icon { display: none; }
   .stats-grid { gap: 9px; }
+  .report-stats { gap: 9px; }
   .stat-card { padding: 16px; }
   .form-row { grid-template-columns: 1fr; }
   .inline-form { flex-wrap: wrap; }
