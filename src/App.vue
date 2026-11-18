@@ -3,17 +3,23 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { apiFetch, getApiUrl } from './services/api'
 
 const sections = [
-  { id: 'resumen', label: 'Resumen', icon: '⌂' },
-  { id: 'reportes', label: 'Reportes', icon: 'R' },
-  { id: 'productos', label: 'Productos', icon: 'P' },
-  { id: 'insumos', label: 'Insumos', icon: 'I' },
-  { id: 'stock', label: 'Stock', icon: 'S' },
-  { id: 'proveedores', label: 'Proveedores', icon: 'Pr' },
-  { id: 'clientes', label: 'Clientes', icon: 'C' },
-  { id: 'recetas', label: 'Recetas', icon: 'R' },
-  { id: 'compras', label: 'Compras', icon: 'Co' },
-  { id: 'ventas', label: 'Ventas', icon: 'Ve' },
-  { id: 'tickets', label: 'Tickets', icon: 'T' },
+  { id: 'resumen', label: 'Resumen', icon: '⌂', group: 'operacion' },
+  { id: 'ventas', label: 'Ventas', icon: 'Ve', group: 'operacion' },
+  { id: 'tickets', label: 'Tickets', icon: 'T', group: 'operacion' },
+  { id: 'compras', label: 'Compras', icon: 'Co', group: 'operacion' },
+  { id: 'reportes', label: 'Reportes', icon: 'R', group: 'operacion' },
+  { id: 'productos', label: 'Productos', icon: 'P', group: 'catalogo' },
+  { id: 'clientes', label: 'Clientes', icon: 'C', group: 'catalogo' },
+  { id: 'proveedores', label: 'Proveedores', icon: 'Pr', group: 'catalogo' },
+  { id: 'insumos', label: 'Insumos', icon: 'I', group: 'produccion' },
+  { id: 'stock', label: 'Stock', icon: 'S', group: 'produccion' },
+  { id: 'recetas', label: 'Recetas', icon: 'R', group: 'produccion' },
+]
+
+const navGroups = [
+  { id: 'operacion', label: 'Operación' },
+  { id: 'catalogo', label: 'Catálogo' },
+  { id: 'produccion', label: 'Producción' },
 ]
 
 const activeSection = ref('resumen')
@@ -46,6 +52,16 @@ const recipeCache = ref({})
 const reportLoading = ref(false)
 const reportError = ref('')
 const report = ref(null)
+const productSearch = ref('')
+const variantSearch = ref('')
+const ticketSearch = ref('')
+const ticketDateFrom = ref('')
+const ticketDateTo = ref('')
+const selectedTicket = ref(null)
+const catalogEditMode = ref(false)
+const editingProductId = ref('')
+const editingVariantId = ref('')
+const editingExtraId = ref('')
 const reportFilters = reactive({
   fecha_desde: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10),
   fecha_hasta: new Date().toISOString().slice(0, 10),
@@ -216,6 +232,7 @@ function addVariantToTicket(variante) {
 }
 
 function removeTicketDetail(index) {
+  if (!window.confirm('¿Eliminar este producto del ticket actual?')) return
   forms.venta.detalles.splice(index, 1)
   if (selectedVariantIndex.value >= forms.venta.detalles.length) {
     selectedVariantIndex.value = Math.max(forms.venta.detalles.length - 1, 0)
@@ -305,6 +322,42 @@ function formatCurrency(value) {
     currency: 'MXN',
   })
 }
+
+const filteredVariants = computed(() => {
+  const term = variantSearch.value.trim().toLocaleLowerCase('es')
+  if (!term) return variantes.value
+  return variantes.value.filter((variante) => {
+    const name = variantProductName(variante).toLocaleLowerCase('es')
+    const size = String(variante.tamano || '').toLocaleLowerCase('es')
+    return name.includes(term) || size.includes(term)
+  })
+})
+
+const filteredCombinedCatalog = computed(() => {
+  const term = productSearch.value.trim().toLocaleLowerCase('es')
+  if (!term) return combinedCatalog.value
+  return combinedCatalog.value.filter((producto) =>
+    producto.nombre.toLocaleLowerCase('es').includes(term) ||
+    producto.categoria.toLocaleLowerCase('es').includes(term),
+  )
+})
+
+const filteredSales = computed(() => {
+  const term = ticketSearch.value.trim().toLocaleLowerCase('es')
+  return ventas.value.filter((venta) => {
+    const date = String(venta.fecha_hora || venta.fecha || venta.created_at || '')
+    if (ticketDateFrom.value && date.slice(0, 10) < ticketDateFrom.value) return false
+    if (ticketDateTo.value && date.slice(0, 10) > ticketDateTo.value) return false
+    if (!term) return true
+    const customer = venta.clientes?.nombre || venta.cliente?.nombre || ''
+    const details = saleDetails(venta).map((detail) =>
+      `${detail.cantidad} ${saleProductName(detail)} ${saleVariantSize(detail)} ${saleExtras(detail).map(saleExtraName).join(' ')}`,
+    ).join(' ')
+    return String(venta.id_venta).includes(term) ||
+      customer.toLocaleLowerCase('es').includes(term) ||
+      details.toLocaleLowerCase('es').includes(term)
+  })
+})
 
 function reportEntries(value) {
   return Object.entries(value || {})
@@ -427,6 +480,74 @@ async function createVariant() {
 
 async function createExtra() {
   await submitForm('extras', { ...forms.extra, precio_actual: Number(forms.extra.precio_actual) }, 'Extra creado correctamente.')
+}
+
+async function updateCatalogItem(resource, id, payload, successMessage) {
+  if (!id) {
+    error.value = 'Selecciona el registro que deseas editar.'
+    return
+  }
+  loading.value = true
+  clearFeedback()
+  try {
+    await apiFetch(`/api/${resource}/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    })
+    await loadData()
+    catalogEditMode.value = false
+    message.value = successMessage
+  } catch (requestError) {
+    error.value = requestError.message
+  } finally {
+    loading.value = false
+  }
+}
+
+async function updateProducto() {
+  await updateCatalogItem('productos', editingProductId.value, {
+    nombre: forms.producto.nombre,
+    categoria: forms.producto.categoria,
+  }, 'Producto actualizado correctamente.')
+}
+
+async function updateVariant() {
+  await updateCatalogItem('variantes', editingVariantId.value, {
+    id_producto: Number(forms.variante.id_producto),
+    tamano: forms.variante.tamano,
+    precio_actual: Number(forms.variante.precio_actual),
+  }, 'Variante actualizada correctamente.')
+}
+
+async function updateExtra() {
+  await updateCatalogItem('extras', editingExtraId.value, {
+    nombre: forms.extra.nombre,
+    precio_actual: Number(forms.extra.precio_actual),
+  }, 'Extra actualizado correctamente.')
+}
+
+function selectProductoEdit(producto) {
+  editingProductId.value = String(producto.id_producto)
+  forms.producto.nombre = producto.nombre
+  forms.producto.categoria = producto.categoria === 'Sin categoría' ? '' : producto.categoria
+  catalogEditMode.value = true
+}
+
+function selectVariantEdit(variante) {
+  editingVariantId.value = String(variante.id_variante)
+  forms.variante.id_producto = variante.id_producto
+  forms.variante.tamano = variante.tamano
+  forms.variante.precio_actual = variante.precio_actual
+  catalogForm.value = 'variante'
+  catalogEditMode.value = true
+}
+
+function selectExtraEdit(extra) {
+  editingExtraId.value = String(extra.id_extra)
+  forms.extra.nombre = extra.nombre
+  forms.extra.precio_actual = extra.precio_actual
+  catalogForm.value = 'extra'
+  catalogEditMode.value = true
 }
 
 async function createProvider() {
@@ -658,6 +779,26 @@ function openPayment() {
   clearFeedback()
 }
 
+function reportUnsupportedOperation(operation) {
+  error.value = `${operation} no está disponible: el backend actual no expone una operación de anulación/devolución ni una tabla para registrarla.`
+}
+
+function printSelectedTicket() {
+  if (!selectedTicket.value) return
+  const details = saleDetails(selectedTicket.value).map((detail) =>
+    `${detail.cantidad} x ${saleProductName(detail)} - ${saleVariantSize(detail)}`
+  ).join('\n')
+  const printWindow = window.open('', '_blank', 'width=420,height=600')
+  if (!printWindow) {
+    error.value = 'El navegador bloqueó la ventana de impresión.'
+    return
+  }
+  printWindow.document.write(`<pre>NIMBUS\nTicket #${selectedTicket.value.id_venta}\n\n${details}\n\nTotal: ${selectedTicket.value.total}</pre>`)
+  printWindow.document.close()
+  printWindow.focus()
+  printWindow.print()
+}
+
 function selectSection(section) {
   activeSection.value = section
   clearFeedback()
@@ -682,17 +823,20 @@ onMounted(() => {
       </div>
 
       <nav class="navigation" aria-label="Navegación principal">
-        <button
-          v-for="section in sections"
-          :key="section.id"
-          class="nav-item"
-          :class="{ active: activeSection === section.id }"
-          type="button"
-          @click="selectSection(section.id)"
-        >
-          <span class="nav-icon">{{ section.icon }}</span>
-          {{ section.label }}
-        </button>
+        <div v-for="group in navGroups" :key="group.id" class="nav-group">
+          <span class="nav-group-label">{{ group.label }}</span>
+          <button
+            v-for="section in sections.filter((item) => item.group === group.id)"
+            :key="section.id"
+            class="nav-item"
+            :class="{ active: activeSection === section.id }"
+            type="button"
+            @click="selectSection(section.id)"
+          >
+            <span class="nav-icon">{{ section.icon }}</span>
+            {{ section.label }}
+          </button>
+        </div>
       </nav>
 
       <div class="sidebar-footer">
@@ -816,19 +960,20 @@ onMounted(() => {
                 <div><p class="eyebrow">Productos y variantes</p><h2>Catálogo</h2></div>
                 <span class="count">{{ combinedCatalog.length }}</span>
               </div>
-              <div v-if="combinedCatalog.length" class="table-wrap">
+              <label class="catalog-search">Buscar<input v-model="productSearch" type="search" placeholder="Nombre o categoría" /></label>
+              <div v-if="filteredCombinedCatalog.length" class="table-wrap">
                 <table>
                   <thead><tr><th>Producto</th><th>Categoría</th><th>Tamaño y precio</th><th>Estado</th></tr></thead>
                   <tbody>
-                    <tr v-for="producto in combinedCatalog" :key="producto.id_producto">
-                      <td><strong>{{ producto.nombre }}</strong></td>
+                    <tr v-for="producto in filteredCombinedCatalog" :key="producto.id_producto">
+                        <td><button class="catalog-name-button" type="button" @click="selectProductoEdit(producto)"><strong>{{ producto.nombre }}</strong></button></td>
                       <td>{{ producto.categoria }}</td>
                       <td>
                         <div v-if="producto.variantes.length" class="variant-price-grid">
-                          <div v-for="variante in producto.variantes" :key="variante.id_variante" class="variant-price">
+                          <button v-for="variante in producto.variantes" :key="variante.id_variante" class="variant-price variant-edit-button" type="button" @click="selectVariantEdit(variante)">
                             <span class="variant-code">{{ variantCode(variante.tamano) }}</span>
                             <strong>{{ Number(variante.precio_actual).toFixed(2) }}</strong>
-                          </div>
+                          </button>
                         </div>
                         <span v-else class="na-value">N/A</span>
                       </td>
@@ -847,7 +992,7 @@ onMounted(() => {
               </div>
               <div v-if="extras.length" class="extra-list">
                 <div v-for="extra in extras" :key="extra.id_extra" class="extra-list-row">
-                  <strong>{{ extra.nombre }}</strong>
+                  <button class="catalog-name-button" type="button" @click="selectExtraEdit(extra)"><strong>{{ extra.nombre }}</strong></button>
                   <span>{{ Number(extra.precio_actual).toFixed(2) }}</span>
                 </div>
               </div>
@@ -863,14 +1008,14 @@ onMounted(() => {
             </div>
 
             <form v-if="catalogForm === 'producto'" @submit.prevent="createProducto">
-              <p class="eyebrow">Nuevo producto</p>
-              <h2>Agregar producto</h2>
+              <div class="details-heading"><div><p class="eyebrow">{{ catalogEditMode ? 'Editar producto' : 'Nuevo producto' }}</p><h2>{{ catalogEditMode ? 'Modificar producto' : 'Agregar producto' }}</h2></div><button v-if="catalogEditMode" class="link-button" type="button" @click="catalogEditMode = false; editingProductId = ''">Cancelar</button></div>
               <label>Nombre<input v-model.trim="forms.producto.nombre" required placeholder="Latte" /></label>
               <label>Categoría<input v-model.trim="forms.producto.categoria" placeholder="Café caliente" /></label>
-              <button class="button primary" type="submit" :disabled="loading">Guardar producto</button>
+              <button v-if="catalogEditMode" class="button primary" type="button" :disabled="loading" @click="updateProducto">Guardar cambios</button>
+              <button v-else class="button primary" type="submit" :disabled="loading">Guardar producto</button>
             </form>
             <form v-else-if="catalogForm === 'variante'" @submit.prevent="createVariant">
-              <p class="eyebrow">Nueva variante</p><h2>Agregar variante</h2>
+              <div class="details-heading"><div><p class="eyebrow">{{ catalogEditMode ? 'Editar variante' : 'Nueva variante' }}</p><h2>{{ catalogEditMode ? 'Modificar variante' : 'Agregar variante' }}</h2></div><button v-if="catalogEditMode" class="link-button" type="button" @click="catalogEditMode = false; editingVariantId = ''">Cancelar</button></div>
               <label>Producto
                 <select v-model="forms.variante.id_producto" required>
                   <option value="" disabled>Selecciona un producto</option>
@@ -879,13 +1024,15 @@ onMounted(() => {
               </label>
               <label>Tamaño<input v-model.trim="forms.variante.tamano" required placeholder="Mediano" /></label>
               <label>Precio actual<input v-model.number="forms.variante.precio_actual" min="0.01" required type="number" step="0.01" /></label>
-              <button class="button primary" type="submit" :disabled="loading">Guardar variante</button>
+              <button v-if="catalogEditMode" class="button primary" type="button" :disabled="loading" @click="updateVariant">Guardar cambios</button>
+              <button v-else class="button primary" type="submit" :disabled="loading">Guardar variante</button>
             </form>
             <form v-else @submit.prevent="createExtra">
-              <p class="eyebrow">Nuevo extra</p><h2>Agregar extra</h2>
+              <div class="details-heading"><div><p class="eyebrow">{{ catalogEditMode ? 'Editar extra' : 'Nuevo extra' }}</p><h2>{{ catalogEditMode ? 'Modificar extra' : 'Agregar extra' }}</h2></div><button v-if="catalogEditMode" class="link-button" type="button" @click="catalogEditMode = false; editingExtraId = ''">Cancelar</button></div>
               <label>Nombre<input v-model.trim="forms.extra.nombre" required placeholder="Leche de almendra" /></label>
               <label>Precio actual<input v-model.number="forms.extra.precio_actual" min="0" required type="number" step="0.01" /></label>
-              <button class="button primary" type="submit" :disabled="loading">Guardar extra</button>
+              <button v-if="catalogEditMode" class="button primary" type="button" :disabled="loading" @click="updateExtra">Guardar cambios</button>
+              <button v-else class="button primary" type="submit" :disabled="loading">Guardar extra</button>
             </form>
           </div>
         </div>
@@ -1172,9 +1319,10 @@ onMounted(() => {
               <div><p class="eyebrow">Catálogo</p><h2>Selecciona productos</h2></div>
               <span class="count">{{ variantes.length }}</span>
             </div>
-            <div v-if="variantes.length" class="product-grid">
+            <label class="catalog-search">Buscar producto o tamaño<input v-model="variantSearch" type="search" placeholder="Latte, grande..." /></label>
+            <div v-if="filteredVariants.length" class="product-grid">
               <button
-                v-for="variante in variantes"
+                v-for="variante in filteredVariants"
                 :key="variante.id_variante"
                 class="product-card"
                 type="button"
@@ -1275,12 +1423,18 @@ onMounted(() => {
 
       <section v-else-if="activeSection === 'tickets'" class="content-section">
         <div class="panel">
-          <div class="panel-heading"><div><p class="eyebrow">Historial</p><h2>Ventas registradas</h2></div><span class="count">{{ ventas.length }}</span></div>
-          <div v-if="ventas.length" class="table-wrap">
-            <table><thead><tr><th>Fecha</th><th>Cliente</th><th>Detalle</th><th>Total</th></tr></thead>
+          <div class="panel-heading"><div><p class="eyebrow">Historial</p><h2>Ventas registradas</h2></div><span class="count">{{ filteredSales.length }}</span></div>
+          <div class="ticket-filters">
+            <label>Buscar<input v-model="ticketSearch" type="search" placeholder="Folio, cliente o producto" /></label>
+            <label>Desde<input v-model="ticketDateFrom" type="date" /></label>
+            <label>Hasta<input v-model="ticketDateTo" type="date" /></label>
+          </div>
+          <div v-if="filteredSales.length" class="table-wrap">
+            <table><thead><tr><th>Folio</th><th>Fecha</th><th>Cliente</th><th>Detalle</th><th>Total</th><th></th></tr></thead>
               <tbody>
-                <tr v-for="venta in ventas" :key="venta.id_venta">
-                  <td>{{ venta.fecha || venta.created_at }}</td>
+                <tr v-for="venta in filteredSales" :key="venta.id_venta" :class="{ selected: selectedTicket?.id_venta === venta.id_venta }">
+                  <td><strong>#{{ venta.id_venta }}</strong></td>
+                  <td>{{ venta.fecha_hora || venta.fecha || venta.created_at }}</td>
                   <td>{{ venta.clientes?.nombre || venta.cliente?.nombre || venta.id_cliente || 'Público general' }}</td>
                   <td>
                     <div v-if="saleDetails(venta).length" class="sale-details">
@@ -1296,11 +1450,35 @@ onMounted(() => {
                     <span v-else class="muted">Sin detalle</span>
                   </td>
                   <td>{{ venta.total }}</td>
+                  <td><button class="link-button" type="button" @click="selectedTicket = venta">Ver</button></td>
                 </tr>
               </tbody>
             </table>
           </div>
-          <p v-else class="empty-state">No hay ventas registradas.</p>
+          <p v-else class="empty-state">No hay ventas que coincidan con el filtro.</p>
+        </div>
+
+        <div v-if="selectedTicket" class="panel ticket-detail">
+          <div class="panel-heading">
+            <div><p class="eyebrow">Ticket #{{ selectedTicket.id_venta }}</p><h2>Detalle de venta</h2></div>
+            <button class="link-button" type="button" @click="selectedTicket = null">Cerrar</button>
+          </div>
+          <p class="muted">Cliente: {{ selectedTicket.clientes?.nombre || selectedTicket.cliente?.nombre || 'Público general' }}</p>
+          <p class="muted">Fecha: {{ selectedTicket.fecha_hora || selectedTicket.fecha || selectedTicket.created_at }}</p>
+          <div class="sale-details">
+            <div v-for="(detalle, detailIndex) in saleDetails(selectedTicket)" :key="detailIndex">
+              <strong>{{ detalle.cantidad }} × {{ saleProductName(detalle) }}</strong>
+              <span>{{ saleVariantSize(detalle) }}</span>
+              <small v-if="saleExtras(detalle).length">
+                Extras: {{ saleExtras(detalle).map((extra) => `${extra.cantidad} × ${saleExtraName(extra)}`).join(', ') }}
+              </small>
+            </div>
+          </div>
+          <div class="ticket-detail-actions">
+            <button class="button secondary" type="button" @click="printSelectedTicket">Reimprimir</button>
+            <button class="button secondary" type="button" @click="reportUnsupportedOperation('Cancelar venta')">Cancelar venta</button>
+            <button class="button secondary" type="button" @click="reportUnsupportedOperation('Devolución')">Devolución</button>
+          </div>
         </div>
       </section>
     </main>
@@ -1328,6 +1506,8 @@ button { cursor: pointer; }
 .brand strong { font-size: 15px; }
 .brand span { margin-top: 3px; color: #87918c; font-size: 11px; }
 .navigation { display: grid; gap: 5px; }
+.nav-group { display: grid; gap: 4px; margin-bottom: 8px; }
+.nav-group-label { padding: 8px 12px 3px; color: #a0a8a3; font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .nav-item { display: flex; align-items: center; gap: 12px; padding: 11px 12px; border: 0; border-radius: 8px; background: transparent; color: #68736e; text-align: left; }
 .nav-item:hover, .nav-item.active { background: #edf3ef; color: #304d42; }
 .nav-icon { display: inline-grid; width: 20px; place-items: center; font-size: 14px; font-weight: 700; }
@@ -1435,6 +1615,10 @@ td:last-child, th:last-child { padding-right: 0; }
 .change-row strong { color: #304d42; }
 .ticket-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .ticket-actions .button { margin: 0; }
+.ticket-filters { display: grid; grid-template-columns: minmax(200px, 1fr) 150px 150px; gap: 10px; margin-bottom: 16px; }
+.ticket-filters label { align-self: end; }
+.ticket-detail-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+.ticket-detail-actions .button { margin: 0; }
 .saved-tickets { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid #edf0ed; }
 .saved-ticket { display: grid; grid-template-columns: minmax(0, 1fr) auto 20px; align-items: center; gap: 7px; }
 .saved-ticket > div { display: grid; font-size: 11px; }
@@ -1446,6 +1630,9 @@ td:last-child, th:last-child { padding-right: 0; }
 .catalog-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; align-items: start; gap: 22px; }
 .catalog-lists { display: grid; gap: 22px; }
 .catalog-forms { display: grid; align-content: start; gap: 14px; }
+.catalog-search { display: grid; gap: 6px; margin: 0 0 12px; color: #56635c; font-size: 12px; font-weight: 600; }
+.catalog-name-button { padding: 0; border: 0; background: transparent; color: inherit; text-align: left; }
+.variant-edit-button { padding: 0; border: 0; background: transparent; cursor: pointer; }
 .catalog-forms form { display: grid; gap: 14px; }
 .catalog-form-tabs { margin-bottom: 4px; }
 .extra-list { display: grid; }
@@ -1506,6 +1693,7 @@ td:last-child, th:last-child { padding-right: 0; }
   .catalog-forms { grid-template-columns: 1fr; }
   .recipe-columns { grid-template-columns: 1fr; }
   .recipe-editor-form { grid-template-columns: 1fr; }
+  .ticket-filters { grid-template-columns: 1fr 1fr; }
   .product-grid, .extra-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
@@ -1522,5 +1710,7 @@ td:last-child, th:last-child { padding-right: 0; }
   .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .extra-grid { grid-template-columns: 1fr; }
   .catalog-forms { grid-template-columns: 1fr; }
+  .ticket-filters { grid-template-columns: 1fr; }
+  .ticket-detail-actions { flex-direction: column; }
 }
 </style>

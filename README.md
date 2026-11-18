@@ -72,6 +72,12 @@ La sección Recetas divide variantes y extras en dos columnas. Cada elemento pue
 
 La sección `Reportes` consulta `GET /api/reportes/resumen` con un rango opcional de fechas (`YYYY-MM-DD`). Muestra ventas, compras, utilidad bruta, ticket promedio y desgloses por método de pago, producto, proveedor e insumo.
 
+## Operación y catálogo
+
+El menú se divide en grupos: Operación, Catálogo y Producción. Las ventas incluyen búsqueda por producto o tamaño, los tickets pueden filtrarse por folio, cliente, producto y fecha, y cada venta puede consultarse y reimprimirse.
+
+Los productos, variantes y extras pueden editarse desde sus listas mediante `PATCH`. También se permite retirar una línea del ticket actual. Las anulaciones y devoluciones requieren que Nimbus API incorpore endpoints y persistencia correspondiente; la interfaz las identifica como operaciones no disponibles y no modifica ventas ni inventario de forma ficticia.
+
 ## Compras y ventas con múltiples detalles
 
 Una compra puede incluir varios insumos. Cada detalle contiene:
