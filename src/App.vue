@@ -111,12 +111,28 @@ function saleDetails(venta) {
 function saleProductName(detail) {
   const variante = detail.variante || detail.variantes || {}
   const producto = variante.producto || variante.productos || {}
-  return producto.nombre || `Variante ${detail.id_variante}`
+  if (producto.nombre) return producto.nombre
+
+  const catalogVariant = variantes.value.find(
+    (item) => Number(item.id_variante) === Number(detail.id_variante),
+  )
+  const catalogProduct = catalogVariant?.productos?.nombre
+    ? catalogVariant
+    : productos.value.find(
+      (item) => Number(item.id_producto) === Number(catalogVariant?.id_producto),
+    )
+  return catalogVariant?.productos?.nombre
+    || catalogVariant?.producto?.nombre
+    || catalogProduct?.nombre
+    || 'Producto'
 }
 
 function saleVariantSize(detail) {
   const variante = detail.variante || detail.variantes || {}
-  return variante.tamano || 'Sin tamaño'
+  if (variante.tamano) return variante.tamano
+  return variantes.value.find(
+    (item) => Number(item.id_variante) === Number(detail.id_variante),
+  )?.tamano || 'Sin tamaño'
 }
 
 function saleExtras(detail) {
@@ -125,7 +141,9 @@ function saleExtras(detail) {
 
 function saleExtraName(extra) {
   const item = extra.extra || extra.extras || {}
-  return item.nombre || `Extra ${extra.id_extra}`
+  return item.nombre || extras.value.find(
+    (entry) => Number(entry.id_extra) === Number(extra.id_extra),
+  )?.nombre || `Extra ${extra.id_extra}`
 }
 
 function ticketDate(value) {
@@ -148,12 +166,18 @@ function ticketVariantLabel(detail) {
 
 function ticketProductAmount(detail) {
   const variante = detail.variante || detail.variantes || {}
-  return Number(variante.precio_actual || 0) * Number(detail.cantidad || 0)
+  const catalogVariant = variantes.value.find(
+    (item) => Number(item.id_variante) === Number(detail.id_variante),
+  )
+  return Number(variante.precio_actual || catalogVariant?.precio_actual || 0) * Number(detail.cantidad || 0)
 }
 
 function ticketExtraAmount(extra) {
   const item = extra.extra || extra.extras || {}
-  return Number(item.precio_actual || 0) * Number(extra.cantidad || 0)
+  const catalogExtra = extras.value.find(
+    (entry) => Number(entry.id_extra) === Number(extra.id_extra),
+  )
+  return Number(item.precio_actual || catalogExtra?.precio_actual || 0) * Number(extra.cantidad || 0)
 }
 
 function variantProductName(variante) {
@@ -176,6 +200,8 @@ const combinedCatalog = computed(() => productos.value.map((producto) => ({
   nombre: producto.nombre,
   categoria: producto.categoria || 'Sin categoría',
   activo: producto.activo !== false,
+  precio_actual: producto.precio_actual,
+  precio: producto.precio,
   variantes: variantes.value.filter(
     (variante) => Number(variante.id_producto) === Number(producto.id_producto),
   ),
@@ -1025,7 +1051,7 @@ onMounted(() => {
                             <strong>{{ Number(variante.precio_actual).toFixed(2) }}</strong>
                           </button>
                         </div>
-                        <span v-else class="na-value">N/A</span>
+                        <strong v-else>{{ Number(producto.precio_actual || producto.precio || 0).toFixed(2) }}</strong>
                       </td>
                       <td><span class="tag" :class="{ inactive: !producto.activo }">{{ producto.activo ? 'Activo' : 'Inactivo' }}</span></td>
                     </tr>
@@ -1197,16 +1223,16 @@ onMounted(() => {
             <p class="eyebrow">Configuración</p>
             <h2>Recetas</h2>
           </div>
-          <button class="button secondary" type="button" @click="recipeEditOpen = !recipeEditOpen">
-            {{ recipeEditOpen ? 'Cerrar edición' : 'Editar recetas' }}
-          </button>
+          <button class="button secondary" type="button" @click="recipeEditOpen = true">Editar recetas</button>
         </div>
 
-        <div v-if="recipeEditOpen" class="panel recipe-editor">
-          <div class="panel-heading">
-            <div><p class="eyebrow">Editor</p><h2>Agregar o retirar insumos</h2></div>
-          </div>
-          <form class="form-row recipe-editor-form" @submit.prevent="createRecipe">
+        <div v-if="recipeEditOpen" class="recipe-modal-backdrop" role="presentation" @click.self="recipeEditOpen = false">
+          <div class="panel recipe-editor" role="dialog" aria-modal="true" aria-labelledby="recipe-editor-title">
+            <div class="panel-heading">
+              <div><p class="eyebrow">Editor</p><h2 id="recipe-editor-title">Agregar o retirar insumos</h2></div>
+              <button class="remove-button" type="button" aria-label="Cerrar editor" @click="recipeEditOpen = false">×</button>
+            </div>
+            <form class="form-row recipe-editor-form" @submit.prevent="createRecipe">
             <label>Elemento
               <select v-model="recetaSeleccionada.id" required>
                 <option value="" disabled>Selecciona</option>
@@ -1236,6 +1262,7 @@ onMounted(() => {
             <label v-if="recetaSeleccionada.tipo === 'variantes'" class="checkbox-label"><input v-model="forms.receta.solo_para_llevar" type="checkbox" /> Solo para llevar</label>
             <button class="button primary" type="submit" :disabled="loading">Agregar insumo</button>
           </form>
+          </div>
         </div>
 
         <div class="recipe-columns">
@@ -1683,7 +1710,8 @@ td:last-child, th:last-child { padding-right: 0; }
 .recipe-ingredients table { margin-top: 4px; }
 .recipe-editor { display: grid; gap: 10px; }
 .recipe-editor-form { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; }
-.recipe-editor { position: sticky; top: 16px; z-index: 5; box-shadow: 0 8px 22px rgba(64, 81, 73, .08); }
+.recipe-modal-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 24px; background: rgba(38, 50, 56, .42); }
+.recipe-editor { width: min(680px, 100%); max-height: 82vh; overflow-y: auto; box-shadow: 0 18px 50px rgba(38, 50, 56, .22); }
 .ticket-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
 .receipt-card { padding: 22px 20px 16px; border: 1px solid #dfe5e0; border-radius: 10px; background: #fff; box-shadow: 0 5px 18px rgba(64, 81, 73, .06); }
 .receipt-header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 12px; border-bottom: 1px dashed #cfd7d2; font-size: 13px; }

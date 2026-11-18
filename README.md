@@ -78,9 +78,9 @@ El menú se divide en grupos: Operación, Catálogo y Producción. Las ventas in
 
 Los productos, variantes y extras pueden editarse desde sus listas mediante `PATCH`. También se permite retirar una línea del ticket actual. Las anulaciones y devoluciones requieren que Nimbus API incorpore endpoints y persistencia correspondiente; la interfaz las identifica como operaciones no disponibles y no modifica ventas ni inventario de forma ficticia.
 
-La sección Tickets muestra las ventas como recibos completos, con fecha, cliente, producto abreviado por tamaño, extras, precios y total. La búsqueda conserva filtros por texto y fechas. Cada recibo puede imprimirse o iniciar la operación de devolución cuando el backend la habilite.
+La sección Tickets muestra las ventas como recibos completos, con fecha, cliente, nombre real del producto abreviado por tamaño, extras, precios y total. La búsqueda conserva filtros por texto y fechas. Cada recibo puede imprimirse o iniciar la operación de devolución cuando el backend la habilite.
 
-El editor de Recetas permanece fijo sobre las listas. Al pulsar `Editar` en una variante o extra, se selecciona automáticamente el elemento y se cargan en el formulario su primer insumo y cantidad consumida.
+El editor de Recetas aparece centrado sobre la pantalla con botón de cierre propio. Al pulsar `Editar` en una variante o extra, se selecciona automáticamente el elemento y se cargan en el formulario su primer insumo y cantidad consumida.
 
 ## Compras y ventas con múltiples detalles
 
