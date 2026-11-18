@@ -45,7 +45,6 @@ npm run preview
 
 La interfaz incluye navegación y conexión con los siguientes módulos:
 
-- Resumen con estado de conexión y estadísticas.
 - Productos.
 - Productos y variantes en un catálogo combinado.
 - Extras integrados en la sección Productos.

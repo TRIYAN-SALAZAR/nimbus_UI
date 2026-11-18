@@ -3,7 +3,6 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { apiFetch, getApiUrl } from './services/api'
 
 const sections = [
-  { id: 'resumen', label: 'Resumen', icon: '⌂', group: 'operacion' },
   { id: 'ventas', label: 'Ventas', icon: 'Ve', group: 'operacion' },
   { id: 'tickets', label: 'Tickets', icon: 'T', group: 'operacion' },
   { id: 'compras', label: 'Compras', icon: 'Co', group: 'operacion' },
@@ -22,7 +21,7 @@ const navGroups = [
   { id: 'produccion', label: 'Producción' },
 ]
 
-const activeSection = ref('resumen')
+const activeSection = ref('ventas')
 const loading = ref(false)
 const message = ref('')
 const error = ref('')
@@ -94,15 +93,8 @@ const forms = reactive({
 })
 
 const activeLabel = computed(
-  () => sections.find((section) => section.id === activeSection.value)?.label || 'Resumen',
+  () => sections.find((section) => section.id === activeSection.value)?.label || 'Ventas',
 )
-
-const stats = computed(() => [
-  { label: 'Productos activos', value: productos.value.length },
-  { label: 'Insumos activos', value: insumos.value.length },
-  { label: 'Clientes', value: clientes.value.length },
-  { label: 'Alertas de stock', value: stock.value.filter((item) => item.necesita_reabastecimiento).length },
-])
 
 function saleDetails(venta) {
   return venta.detalle_venta || venta.detalles || []
@@ -938,39 +930,7 @@ onMounted(() => {
         <span class="error-hint">Verifica que el backend esté ejecutándose en {{ getApiUrl() }}.</span>
       </div>
 
-      <section v-if="activeSection === 'resumen'" class="content-section">
-        <div class="welcome-card">
-          <div>
-            <p class="eyebrow">Panel principal</p>
-            <h2>Control de tu cafetería</h2>
-            <p>Consulta la información disponible en Nimbus API desde una vista sencilla.</p>
-          </div>
-          <span class="welcome-icon">☕</span>
-        </div>
-
-        <div class="stats-grid">
-          <article v-for="stat in stats" :key="stat.label" class="stat-card">
-            <span>{{ stat.label }}</span>
-            <strong>{{ stat.value }}</strong>
-          </article>
-        </div>
-
-        <div class="panel">
-          <div class="panel-heading">
-            <div>
-              <p class="eyebrow">Configuración</p>
-              <h2>Conexión actual</h2>
-            </div>
-            <span class="connection-badge" :class="{ connected: apiOnline }">
-              {{ apiOnline ? 'Conectada' : 'Pendiente' }}
-            </span>
-          </div>
-          <p class="muted">URL base del backend: <code>{{ getApiUrl() }}</code></p>
-          <p class="muted">Configúrala con la variable <code>VITE_API_URL</code> en un archivo <code>.env</code>.</p>
-        </div>
-      </section>
-
-      <section v-else-if="activeSection === 'reportes'" class="content-section">
+      <section v-if="activeSection === 'reportes'" class="content-section">
         <div class="report-toolbar panel">
           <div>
             <p class="eyebrow">Análisis financiero</p>
