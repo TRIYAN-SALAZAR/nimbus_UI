@@ -57,7 +57,6 @@ const variantSearch = ref('')
 const ticketSearch = ref('')
 const ticketDateFrom = ref('')
 const ticketDateTo = ref('')
-const selectedTicket = ref(null)
 const catalogEditMode = ref(false)
 const editingProductId = ref('')
 const editingVariantId = ref('')
@@ -127,6 +126,34 @@ function saleExtras(detail) {
 function saleExtraName(extra) {
   const item = extra.extra || extra.extras || {}
   return item.nombre || `Extra ${extra.id_extra}`
+}
+
+function ticketDate(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, 10)
+  return `${String(date.getDate()).padStart(2, '0')}-${String(date.getMonth() + 1).padStart(2, '0')}-${date.getFullYear()}`
+}
+
+function ticketClient(venta) {
+  return venta.clientes?.nombre || venta.cliente?.nombre || 'Público general'
+}
+
+function ticketVariantLabel(detail) {
+  const size = saleVariantSize(detail)
+  const code = variantCode(size)
+  const name = saleProductName(detail)
+  return code && code !== '?' ? `${name} ${code}.` : name
+}
+
+function ticketProductAmount(detail) {
+  const variante = detail.variante || detail.variantes || {}
+  return Number(variante.precio_actual || 0) * Number(detail.cantidad || 0)
+}
+
+function ticketExtraAmount(extra) {
+  const item = extra.extra || extra.extras || {}
+  return Number(item.precio_actual || 0) * Number(extra.cantidad || 0)
 }
 
 function variantProductName(variante) {
@@ -595,7 +622,21 @@ function openRecipeEditor(tipo, id) {
   recetaSeleccionada.value = { tipo, id }
   recipeEditOpen.value = true
   clearFeedback()
-  if (!recipeCache.value[`${tipo}-${id}`]) toggleRecipe(tipo, id)
+  const key = `${tipo}-${id}`
+  const load = async () => {
+    if (!recipeCache.value[key]) {
+      await toggleRecipe(tipo, id)
+    }
+    const details = recipeCache.value[key] || []
+    if (details.length) {
+      forms.receta.id_insumo = details[0].id_insumo
+      forms.receta.cantidad_consumida = details[0].cantidad_consumida
+    } else {
+      forms.receta.id_insumo = ''
+      forms.receta.cantidad_consumida = ''
+    }
+  }
+  load()
 }
 
 async function refreshRecipe(tipo, id) {
@@ -783,17 +824,26 @@ function reportUnsupportedOperation(operation) {
   error.value = `${operation} no está disponible: el backend actual no expone una operación de anulación/devolución ni una tabla para registrarla.`
 }
 
-function printSelectedTicket() {
-  if (!selectedTicket.value) return
-  const details = saleDetails(selectedTicket.value).map((detail) =>
-    `${detail.cantidad} x ${saleProductName(detail)} - ${saleVariantSize(detail)}`
-  ).join('\n')
+function printTicket(venta) {
+  if (!venta) return
+  const lines = saleDetails(venta).flatMap((detail) => {
+    const product = `${ticketVariantLabel(detail)} x${detail.cantidad}`
+      .replace(' x', ' x')
+    const productLine = `${product.padEnd(34, ' ')}${ticketProductAmount(detail).toFixed(2)}`
+    const extras = saleExtras(detail).map((extra) =>
+      `  -${saleExtraName(extra)} x${extra.cantidad}`.padEnd(34, ' ') +
+      ticketExtraAmount(extra).toFixed(2),
+    )
+    return [productLine, ...extras]
+  }).join('\n')
   const printWindow = window.open('', '_blank', 'width=420,height=600')
   if (!printWindow) {
     error.value = 'El navegador bloqueó la ventana de impresión.'
     return
   }
-  printWindow.document.write(`<pre>NIMBUS\nTicket #${selectedTicket.value.id_venta}\n\n${details}\n\nTotal: ${selectedTicket.value.total}</pre>`)
+  printWindow.document.write(
+    `<pre>NIMBUS\n#${venta.id_venta}\n${ticketDate(venta.fecha_hora || venta.fecha || venta.created_at)}\n${ticketClient(venta)}\n\n${lines}\n\nTOTAL${' '.repeat(29)}${Number(venta.total || 0).toFixed(2)}</pre>`,
+  )
   printWindow.document.close()
   printWindow.focus()
   printWindow.print()
@@ -1422,64 +1472,45 @@ onMounted(() => {
       </section>
 
       <section v-else-if="activeSection === 'tickets'" class="content-section">
-        <div class="panel">
-          <div class="panel-heading"><div><p class="eyebrow">Historial</p><h2>Ventas registradas</h2></div><span class="count">{{ filteredSales.length }}</span></div>
-          <div class="ticket-filters">
-            <label>Buscar<input v-model="ticketSearch" type="search" placeholder="Folio, cliente o producto" /></label>
-            <label>Desde<input v-model="ticketDateFrom" type="date" /></label>
-            <label>Hasta<input v-model="ticketDateTo" type="date" /></label>
-          </div>
-          <div v-if="filteredSales.length" class="table-wrap">
-            <table><thead><tr><th>Folio</th><th>Fecha</th><th>Cliente</th><th>Detalle</th><th>Total</th><th></th></tr></thead>
-              <tbody>
-                <tr v-for="venta in filteredSales" :key="venta.id_venta" :class="{ selected: selectedTicket?.id_venta === venta.id_venta }">
-                  <td><strong>#{{ venta.id_venta }}</strong></td>
-                  <td>{{ venta.fecha_hora || venta.fecha || venta.created_at }}</td>
-                  <td>{{ venta.clientes?.nombre || venta.cliente?.nombre || venta.id_cliente || 'Público general' }}</td>
-                  <td>
-                    <div v-if="saleDetails(venta).length" class="sale-details">
-                      <div v-for="(detalle, detailIndex) in saleDetails(venta)" :key="detailIndex">
-                        <strong>{{ detalle.cantidad }} × {{ saleProductName(detalle) }}</strong>
-                        <span>{{ saleVariantSize(detalle) }}</span>
-                        <small v-if="saleExtras(detalle).length">
-                          Extras:
-                          {{ saleExtras(detalle).map((extra) => `${extra.cantidad} × ${saleExtraName(extra)}`).join(', ') }}
-                        </small>
-                      </div>
-                    </div>
-                    <span v-else class="muted">Sin detalle</span>
-                  </td>
-                  <td>{{ venta.total }}</td>
-                  <td><button class="link-button" type="button" @click="selectedTicket = venta">Ver</button></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <p v-else class="empty-state">No hay ventas que coincidan con el filtro.</p>
+        <div class="ticket-filters panel">
+          <label>Buscar<input v-model="ticketSearch" type="search" placeholder="Folio, cliente o producto" /></label>
+          <label>Desde<input v-model="ticketDateFrom" type="date" /></label>
+          <label>Hasta<input v-model="ticketDateTo" type="date" /></label>
         </div>
 
-        <div v-if="selectedTicket" class="panel ticket-detail">
-          <div class="panel-heading">
-            <div><p class="eyebrow">Ticket #{{ selectedTicket.id_venta }}</p><h2>Detalle de venta</h2></div>
-            <button class="link-button" type="button" @click="selectedTicket = null">Cerrar</button>
-          </div>
-          <p class="muted">Cliente: {{ selectedTicket.clientes?.nombre || selectedTicket.cliente?.nombre || 'Público general' }}</p>
-          <p class="muted">Fecha: {{ selectedTicket.fecha_hora || selectedTicket.fecha || selectedTicket.created_at }}</p>
-          <div class="sale-details">
-            <div v-for="(detalle, detailIndex) in saleDetails(selectedTicket)" :key="detailIndex">
-              <strong>{{ detalle.cantidad }} × {{ saleProductName(detalle) }}</strong>
-              <span>{{ saleVariantSize(detalle) }}</span>
-              <small v-if="saleExtras(detalle).length">
-                Extras: {{ saleExtras(detalle).map((extra) => `${extra.cantidad} × ${saleExtraName(extra)}`).join(', ') }}
-              </small>
+        <div v-if="filteredSales.length" class="ticket-grid">
+          <article v-for="venta in filteredSales" :key="venta.id_venta" class="receipt-card">
+            <div class="receipt-header">
+              <strong>NIMBUS</strong>
+              <span>#{{ venta.id_venta }}</span>
             </div>
-          </div>
-          <div class="ticket-detail-actions">
-            <button class="button secondary" type="button" @click="printSelectedTicket">Reimprimir</button>
-            <button class="button secondary" type="button" @click="reportUnsupportedOperation('Cancelar venta')">Cancelar venta</button>
-            <button class="button secondary" type="button" @click="reportUnsupportedOperation('Devolución')">Devolución</button>
-          </div>
+            <div class="receipt-meta">
+              <span>{{ ticketDate(venta.fecha_hora || venta.fecha || venta.created_at) }}</span>
+              <span>{{ ticketClient(venta) }}</span>
+            </div>
+            <div class="receipt-lines">
+              <div v-for="(detalle, detailIndex) in saleDetails(venta)" :key="detailIndex" class="receipt-detail">
+                <div class="receipt-line">
+                  <span><strong>{{ ticketVariantLabel(detalle) }}</strong> x{{ detalle.cantidad }}</span>
+                  <strong>{{ ticketProductAmount(detalle).toFixed(2) }}</strong>
+                </div>
+                <div v-for="(extra, extraIndex) in saleExtras(detalle)" :key="extraIndex" class="receipt-extra">
+                  <span>-{{ saleExtraName(extra) }} x{{ extra.cantidad }}</span>
+                  <span>{{ ticketExtraAmount(extra).toFixed(2) }}</span>
+                </div>
+              </div>
+            </div>
+            <div class="receipt-total">
+              <span>Total</span>
+              <strong>{{ Number(venta.total || 0).toFixed(2) }}</strong>
+            </div>
+            <div class="ticket-detail-actions">
+              <button class="button secondary" type="button" @click="printTicket(venta)">Imprimir</button>
+              <button class="button secondary" type="button" @click="reportUnsupportedOperation('Devolución')">Devolver</button>
+            </div>
+          </article>
         </div>
+        <p v-else class="empty-state">No hay ventas que coincidan con el filtro.</p>
       </section>
     </main>
   </div>
@@ -1652,6 +1683,20 @@ td:last-child, th:last-child { padding-right: 0; }
 .recipe-ingredients table { margin-top: 4px; }
 .recipe-editor { display: grid; gap: 10px; }
 .recipe-editor-form { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; }
+.recipe-editor { position: sticky; top: 16px; z-index: 5; box-shadow: 0 8px 22px rgba(64, 81, 73, .08); }
+.ticket-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.receipt-card { padding: 22px 20px 16px; border: 1px solid #dfe5e0; border-radius: 10px; background: #fff; box-shadow: 0 5px 18px rgba(64, 81, 73, .06); }
+.receipt-header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 12px; border-bottom: 1px dashed #cfd7d2; font-size: 13px; }
+.receipt-header strong { letter-spacing: .12em; }
+.receipt-header span { color: #89938e; font-size: 11px; }
+.receipt-meta { display: flex; justify-content: space-between; gap: 10px; padding: 11px 0; color: #53635b; font-size: 11px; }
+.receipt-lines { min-height: 90px; padding: 8px 0; border-top: 1px solid #edf0ed; border-bottom: 1px dashed #cfd7d2; }
+.receipt-detail { margin-bottom: 8px; }
+.receipt-line, .receipt-extra { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; }
+.receipt-line span { min-width: 0; }
+.receipt-extra { padding: 3px 0 0 14px; color: #78827d; font-size: 11px; }
+.receipt-total { display: flex; justify-content: space-between; padding: 12px 0 7px; }
+.receipt-total strong { font-size: 17px; }
 .variant-price-grid { display: flex; align-items: center; gap: 8px; }
 .variant-price { display: grid; justify-items: center; gap: 5px; }
 .variant-price strong { color: #53635b; font-size: 12px; }
@@ -1693,6 +1738,7 @@ td:last-child, th:last-child { padding-right: 0; }
   .catalog-forms { grid-template-columns: 1fr; }
   .recipe-columns { grid-template-columns: 1fr; }
   .recipe-editor-form { grid-template-columns: 1fr; }
+  .ticket-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ticket-filters { grid-template-columns: 1fr 1fr; }
   .product-grid, .extra-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
@@ -1712,5 +1758,7 @@ td:last-child, th:last-child { padding-right: 0; }
   .catalog-forms { grid-template-columns: 1fr; }
   .ticket-filters { grid-template-columns: 1fr; }
   .ticket-detail-actions { flex-direction: column; }
+  .ticket-grid { grid-template-columns: 1fr; }
+  .recipe-editor { position: static; }
 }
 </style>
