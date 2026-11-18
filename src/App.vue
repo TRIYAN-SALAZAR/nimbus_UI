@@ -5,7 +5,6 @@ import { apiFetch, getApiUrl } from './services/api'
 const sections = [
   { id: 'resumen', label: 'Resumen', icon: '⌂' },
   { id: 'productos', label: 'Productos', icon: 'P' },
-  { id: 'extras', label: 'Extras', icon: 'E' },
   { id: 'insumos', label: 'Insumos', icon: 'I' },
   { id: 'stock', label: 'Stock', icon: 'S' },
   { id: 'proveedores', label: 'Proveedores', icon: 'Pr' },
@@ -39,6 +38,10 @@ const showPayment = ref(false)
 const selectedVariantIndex = ref(0)
 const recetaSeleccionada = ref({ tipo: 'variantes', id: '' })
 const recetaDetalle = ref([])
+const catalogForm = ref('producto')
+const recipeEditOpen = ref(false)
+const expandedRecipes = ref({})
+const recipeCache = ref({})
 
 const forms = reactive({
   producto: { nombre: '', categoria: '' },
@@ -77,8 +80,6 @@ const stats = computed(() => [
   { label: 'Clientes', value: clientes.value.length },
   { label: 'Alertas de stock', value: stock.value.filter((item) => item.necesita_reabastecimiento).length },
 ])
-
-const recetaEntidad = computed(() => (recetaSeleccionada.value.tipo === 'variantes' ? variantes.value : extras.value))
 
 function saleDetails(venta) {
   return venta.detalle_venta || venta.detalles || []
@@ -412,6 +413,43 @@ async function loadRecipe() {
   }
 }
 
+async function toggleRecipe(tipo, id) {
+  const key = `${tipo}-${id}`
+  if (expandedRecipes.value[key]) {
+    expandedRecipes.value[key] = false
+    return
+  }
+
+  recetaSeleccionada.value = { tipo, id }
+  try {
+    const details = (await apiFetch(`/api/recetas/${tipo}/${id}`)) || []
+    recipeCache.value[key] = details
+    recetaDetalle.value = details
+    expandedRecipes.value[key] = true
+  } catch (requestError) {
+    error.value = requestError.message
+  }
+}
+
+function recipeDetails(tipo, id) {
+  return recipeCache.value[`${tipo}-${id}`] || []
+}
+
+function openRecipeEditor(tipo, id) {
+  recetaSeleccionada.value = { tipo, id }
+  recipeEditOpen.value = true
+  clearFeedback()
+  if (!recipeCache.value[`${tipo}-${id}`]) toggleRecipe(tipo, id)
+}
+
+async function refreshRecipe(tipo, id) {
+  try {
+    recipeCache.value[`${tipo}-${id}`] = (await apiFetch(`/api/recetas/${tipo}/${id}`)) || []
+  } catch (requestError) {
+    error.value = requestError.message
+  }
+}
+
 async function createRecipe() {
   const { tipo, id } = recetaSeleccionada.value
   if (!id) {
@@ -430,6 +468,8 @@ async function createRecipe() {
   try {
     await apiFetch(`/api/recetas/${tipo}/${id}`, { method: 'POST', body: JSON.stringify(payload) })
     await loadRecipe()
+    await refreshRecipe(tipo, id)
+    expandedRecipes.value[`${tipo}-${id}`] = true
     message.value = 'Receta actualizada correctamente.'
   } catch (requestError) {
     error.value = requestError.message
@@ -438,13 +478,13 @@ async function createRecipe() {
   }
 }
 
-async function deleteRecipe(idInsumo) {
-  const { tipo, id } = recetaSeleccionada.value
+async function deleteRecipe(idInsumo, tipo = recetaSeleccionada.value.tipo, id = recetaSeleccionada.value.id) {
   loading.value = true
   clearFeedback()
   try {
     await apiFetch(`/api/recetas/${tipo}/${id}/insumos/${idInsumo}`, { method: 'DELETE' })
     await loadRecipe()
+    await refreshRecipe(tipo, id)
     message.value = 'Insumo retirado de la receta.'
   } catch (requestError) {
     error.value = requestError.message
@@ -676,44 +716,66 @@ onMounted(() => {
 
       <section v-else-if="activeSection === 'productos'" class="content-section">
         <div class="catalog-layout">
-          <div class="panel">
-            <div class="panel-heading">
-              <div><p class="eyebrow">Productos y variantes</p><h2>Catálogo</h2></div>
-              <span class="count">{{ combinedCatalog.length }}</span>
-            </div>
-            <div v-if="combinedCatalog.length" class="table-wrap">
-              <table>
-                <thead><tr><th>Producto</th><th>Categoría</th><th>Tamaño y precio</th><th>Estado</th></tr></thead>
-                <tbody>
-                  <tr v-for="producto in combinedCatalog" :key="producto.id_producto">
-                    <td><strong>{{ producto.nombre }}</strong></td>
-                    <td>{{ producto.categoria }}</td>
-                    <td>
-                      <div v-if="producto.variantes.length" class="variant-price-grid">
-                        <div v-for="variante in producto.variantes" :key="variante.id_variante" class="variant-price">
-                          <span class="variant-code">{{ variantCode(variante.tamano) }}</span>
-                          <strong>{{ Number(variante.precio_actual).toFixed(2) }}</strong>
+          <div class="catalog-lists">
+            <div class="panel">
+              <div class="panel-heading">
+                <div><p class="eyebrow">Productos y variantes</p><h2>Catálogo</h2></div>
+                <span class="count">{{ combinedCatalog.length }}</span>
+              </div>
+              <div v-if="combinedCatalog.length" class="table-wrap">
+                <table>
+                  <thead><tr><th>Producto</th><th>Categoría</th><th>Tamaño y precio</th><th>Estado</th></tr></thead>
+                  <tbody>
+                    <tr v-for="producto in combinedCatalog" :key="producto.id_producto">
+                      <td><strong>{{ producto.nombre }}</strong></td>
+                      <td>{{ producto.categoria }}</td>
+                      <td>
+                        <div v-if="producto.variantes.length" class="variant-price-grid">
+                          <div v-for="variante in producto.variantes" :key="variante.id_variante" class="variant-price">
+                            <span class="variant-code">{{ variantCode(variante.tamano) }}</span>
+                            <strong>{{ Number(variante.precio_actual).toFixed(2) }}</strong>
+                          </div>
                         </div>
-                      </div>
-                      <span v-else class="na-value">N/A</span>
-                    </td>
-                    <td><span class="tag" :class="{ inactive: !producto.activo }">{{ producto.activo ? 'Activo' : 'Inactivo' }}</span></td>
-                  </tr>
-                </tbody>
-              </table>
+                        <span v-else class="na-value">N/A</span>
+                      </td>
+                      <td><span class="tag" :class="{ inactive: !producto.activo }">{{ producto.activo ? 'Activo' : 'Inactivo' }}</span></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p v-else class="empty-state">No hay productos para mostrar.</p>
             </div>
-            <p v-else class="empty-state">No hay productos para mostrar.</p>
+
+            <div class="panel">
+              <div class="panel-heading">
+                <div><p class="eyebrow">Complementos</p><h2>Extras</h2></div>
+                <span class="count">{{ extras.length }}</span>
+              </div>
+              <div v-if="extras.length" class="extra-list">
+                <div v-for="extra in extras" :key="extra.id_extra" class="extra-list-row">
+                  <strong>{{ extra.nombre }}</strong>
+                  <span>{{ Number(extra.precio_actual).toFixed(2) }}</span>
+                </div>
+              </div>
+              <p v-else class="empty-state">No hay extras para mostrar.</p>
+            </div>
           </div>
 
-          <div class="catalog-forms">
-            <form class="panel form-panel" @submit.prevent="createProducto">
+          <div class="catalog-forms panel form-panel">
+            <div class="tab-bar catalog-form-tabs">
+              <button class="tab-button" :class="{ active: catalogForm === 'producto' }" type="button" @click="catalogForm = 'producto'">Producto</button>
+              <button class="tab-button" :class="{ active: catalogForm === 'variante' }" type="button" @click="catalogForm = 'variante'">Variante</button>
+              <button class="tab-button" :class="{ active: catalogForm === 'extra' }" type="button" @click="catalogForm = 'extra'">Extra</button>
+            </div>
+
+            <form v-if="catalogForm === 'producto'" @submit.prevent="createProducto">
               <p class="eyebrow">Nuevo producto</p>
               <h2>Agregar producto</h2>
               <label>Nombre<input v-model.trim="forms.producto.nombre" required placeholder="Latte" /></label>
               <label>Categoría<input v-model.trim="forms.producto.categoria" placeholder="Café caliente" /></label>
               <button class="button primary" type="submit" :disabled="loading">Guardar producto</button>
             </form>
-            <form class="panel form-panel" @submit.prevent="createVariant">
+            <form v-else-if="catalogForm === 'variante'" @submit.prevent="createVariant">
               <p class="eyebrow">Nueva variante</p><h2>Agregar variante</h2>
               <label>Producto
                 <select v-model="forms.variante.id_producto" required>
@@ -725,29 +787,13 @@ onMounted(() => {
               <label>Precio actual<input v-model.number="forms.variante.precio_actual" min="0.01" required type="number" step="0.01" /></label>
               <button class="button primary" type="submit" :disabled="loading">Guardar variante</button>
             </form>
+            <form v-else @submit.prevent="createExtra">
+              <p class="eyebrow">Nuevo extra</p><h2>Agregar extra</h2>
+              <label>Nombre<input v-model.trim="forms.extra.nombre" required placeholder="Leche de almendra" /></label>
+              <label>Precio actual<input v-model.number="forms.extra.precio_actual" min="0" required type="number" step="0.01" /></label>
+              <button class="button primary" type="submit" :disabled="loading">Guardar extra</button>
+            </form>
           </div>
-        </div>
-      </section>
-
-      <section v-else-if="activeSection === 'extras'" class="content-section">
-        <div class="section-grid">
-          <div class="panel">
-            <div class="panel-heading">
-              <div><p class="eyebrow">Catálogo</p><h2>Extras</h2></div><span class="count">{{ extras.length }}</span>
-            </div>
-            <div v-if="extras.length" class="table-wrap">
-              <table><thead><tr><th>Nombre</th><th>Precio</th></tr></thead>
-                <tbody><tr v-for="extra in extras" :key="extra.id_extra"><td>{{ extra.nombre }}</td><td>{{ extra.precio_actual }}</td></tr></tbody>
-              </table>
-            </div>
-            <p v-else class="empty-state">No hay extras para mostrar.</p>
-          </div>
-          <form class="panel form-panel" @submit.prevent="createExtra">
-            <p class="eyebrow">Nuevo registro</p><h2>Agregar extra</h2>
-            <label>Nombre<input v-model.trim="forms.extra.nombre" required placeholder="Leche de almendra" /></label>
-            <label>Precio actual<input v-model.number="forms.extra.precio_actual" min="0" required type="number" step="0.01" /></label>
-            <button class="button primary" type="submit" :disabled="loading">Guardar extra</button>
-          </form>
         </div>
       </section>
 
@@ -855,43 +901,113 @@ onMounted(() => {
       </section>
 
       <section v-else-if="activeSection === 'recetas'" class="content-section">
-        <div class="section-grid">
-          <div class="panel">
-            <div class="panel-heading"><div><p class="eyebrow">Configuración</p><h2>Receta seleccionada</h2></div></div>
-            <div class="form-row">
-              <label>Tipo
-                <select v-model="recetaSeleccionada.tipo" @change="recetaSeleccionada.id = ''; recetaDetalle = []">
-                  <option value="variantes">Variante</option><option value="extras">Extra</option>
-                </select>
-              </label>
-              <label>Elemento
-                <select v-model="recetaSeleccionada.id" @change="loadRecipe">
-                  <option value="">Selecciona</option>
-                  <option v-for="item in recetaEntidad" :key="item.id_variante || item.id_extra" :value="item.id_variante || item.id_extra">
-                    {{ item.nombre || `${item.productos?.nombre || 'Producto'} - ${item.tamano}` }}
-                  </option>
-                </select>
-              </label>
-            </div>
-            <div v-if="recetaDetalle.length" class="table-wrap">
-              <table><thead><tr><th>ID</th><th>Insumo</th><th>Cantidad gastada</th><th></th></tr></thead>
-                <tbody><tr v-for="receta in recetaDetalle" :key="receta.id_insumo">
-                  <td>{{ receta.id_insumo }}</td>
-                  <td>{{ ingredientName(receta) }}</td>
-                  <td>{{ receta.cantidad_consumida }}</td>
-                  <td><button class="link-button" type="button" @click="deleteRecipe(receta.id_insumo)">Eliminar</button></td>
-                </tr></tbody>
-              </table>
-            </div>
-            <p v-else class="empty-state">Selecciona un elemento para consultar su receta.</p>
+        <div class="recipe-header">
+          <div>
+            <p class="eyebrow">Configuración</p>
+            <h2>Recetas</h2>
           </div>
-          <form class="panel form-panel" @submit.prevent="createRecipe">
-            <p class="eyebrow">Nuevo ingrediente</p><h2>Agregar insumo</h2>
-            <label>Insumo<select v-model="forms.receta.id_insumo" required><option value="" disabled>Selecciona</option><option v-for="insumo in insumos" :key="insumo.id_insumo" :value="insumo.id_insumo">{{ insumo.nombre }}</option></select></label>
+          <button class="button secondary" type="button" @click="recipeEditOpen = !recipeEditOpen">
+            {{ recipeEditOpen ? 'Cerrar edición' : 'Editar recetas' }}
+          </button>
+        </div>
+
+        <div v-if="recipeEditOpen" class="panel recipe-editor">
+          <div class="panel-heading">
+            <div><p class="eyebrow">Editor</p><h2>Agregar o retirar insumos</h2></div>
+          </div>
+          <form class="form-row recipe-editor-form" @submit.prevent="createRecipe">
+            <label>Elemento
+              <select v-model="recetaSeleccionada.id" required>
+                <option value="" disabled>Selecciona</option>
+                <template v-if="recetaSeleccionada.tipo === 'variantes'">
+                  <option v-for="item in variantes" :key="item.id_variante" :value="item.id_variante">
+                    {{ variantProductName(item) }} · {{ item.tamano || 'Sin tamaño' }}
+                  </option>
+                </template>
+                <template v-else>
+                  <option v-for="item in extras" :key="item.id_extra" :value="item.id_extra">{{ item.nombre }}</option>
+                </template>
+              </select>
+            </label>
+            <label>Tipo
+              <select v-model="recetaSeleccionada.tipo" @change="recetaSeleccionada.id = ''">
+                <option value="variantes">Variante</option>
+                <option value="extras">Extra</option>
+              </select>
+            </label>
+            <label>Insumo
+              <select v-model="forms.receta.id_insumo" required>
+                <option value="" disabled>Selecciona</option>
+                <option v-for="insumo in insumos" :key="insumo.id_insumo" :value="insumo.id_insumo">{{ insumo.nombre }}</option>
+              </select>
+            </label>
             <label>Cantidad consumida<input v-model.number="forms.receta.cantidad_consumida" min="0.000001" required type="number" step="0.000001" /></label>
             <label v-if="recetaSeleccionada.tipo === 'variantes'" class="checkbox-label"><input v-model="forms.receta.solo_para_llevar" type="checkbox" /> Solo para llevar</label>
-            <button class="button primary" type="submit" :disabled="loading">Guardar ingrediente</button>
+            <button class="button primary" type="submit" :disabled="loading">Agregar insumo</button>
           </form>
+        </div>
+
+        <div class="recipe-columns">
+          <div class="panel">
+            <div class="panel-heading"><div><p class="eyebrow">Variantes</p><h2>Recetas de productos</h2></div><span class="count">{{ variantes.length }}</span></div>
+            <div v-if="variantes.length" class="recipe-list">
+              <div v-for="variante in variantes" :key="variante.id_variante" class="recipe-item">
+                <div class="recipe-row" role="button" tabindex="0" @click="toggleRecipe('variantes', variante.id_variante)" @keydown.enter="toggleRecipe('variantes', variante.id_variante)">
+                  <span class="recipe-triangle" :class="{ open: expandedRecipes[`variantes-${variante.id_variante}`] }">▸</span>
+                  <strong>{{ variantProductName(variante) }}</strong>
+                  <span class="variant-code">{{ variantCode(variante.tamano) }}</span>
+                  <small>{{ variante.tamano || 'Sin tamaño' }}</small>
+                  <button class="link-button recipe-edit" type="button" @click.stop="openRecipeEditor('variantes', variante.id_variante)">Editar</button>
+                </div>
+                <div v-if="expandedRecipes[`variantes-${variante.id_variante}`]" class="recipe-ingredients">
+                  <table v-if="recipeDetails('variantes', variante.id_variante).length">
+                    <thead><tr><th>ID</th><th>Insumo</th><th>Cantidad</th><th></th></tr></thead>
+                    <tbody>
+                      <tr v-for="receta in recipeDetails('variantes', variante.id_variante)" :key="receta.id_insumo">
+                        <td>{{ receta.id_insumo }}</td>
+                        <td>{{ ingredientName(receta) }}</td>
+                        <td>{{ receta.cantidad_consumida }}</td>
+                        <td v-if="recipeEditOpen"><button class="link-button" type="button" @click="deleteRecipe(receta.id_insumo, 'variantes', variante.id_variante)">Eliminar</button></td>
+                        <td v-else></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <p v-else class="empty-state">Sin insumos registrados.</p>
+                </div>
+              </div>
+            </div>
+            <p v-else class="empty-state">No hay variantes disponibles.</p>
+          </div>
+
+          <div class="panel">
+            <div class="panel-heading"><div><p class="eyebrow">Extras</p><h2>Recetas de extras</h2></div><span class="count">{{ extras.length }}</span></div>
+            <div v-if="extras.length" class="recipe-list">
+              <div v-for="extra in extras" :key="extra.id_extra" class="recipe-item">
+                <div class="recipe-row" role="button" tabindex="0" @click="toggleRecipe('extras', extra.id_extra)" @keydown.enter="toggleRecipe('extras', extra.id_extra)">
+                  <span class="recipe-triangle" :class="{ open: expandedRecipes[`extras-${extra.id_extra}`] }">▸</span>
+                  <strong>{{ extra.nombre }}</strong>
+                  <small>{{ Number(extra.precio_actual).toFixed(2) }}</small>
+                  <button class="link-button recipe-edit" type="button" @click.stop="openRecipeEditor('extras', extra.id_extra)">Editar</button>
+                </div>
+                <div v-if="expandedRecipes[`extras-${extra.id_extra}`]" class="recipe-ingredients">
+                  <table v-if="recipeDetails('extras', extra.id_extra).length">
+                    <thead><tr><th>ID</th><th>Insumo</th><th>Cantidad</th><th></th></tr></thead>
+                    <tbody>
+                      <tr v-for="receta in recipeDetails('extras', extra.id_extra)" :key="receta.id_insumo">
+                        <td>{{ receta.id_insumo }}</td>
+                        <td>{{ ingredientName(receta) }}</td>
+                        <td>{{ receta.cantidad_consumida }}</td>
+                        <td v-if="recipeEditOpen"><button class="link-button" type="button" @click="deleteRecipe(receta.id_insumo, 'extras', extra.id_extra)">Eliminar</button></td>
+                        <td v-else></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <p v-else class="empty-state">Sin insumos registrados.</p>
+                </div>
+              </div>
+            </div>
+            <p v-else class="empty-state">No hay extras disponibles.</p>
+          </div>
         </div>
       </section>
 
@@ -1224,7 +1340,27 @@ td:last-child, th:last-child { padding-right: 0; }
 .variant-format { display: flex; align-items: center; gap: 8px; }
 .variant-code { display: inline-grid; width: 30px; height: 30px; place-items: center; border: 1px solid #cfd7d2; border-radius: 7px; background: #edf1ee; color: #405149; font-size: 12px; font-weight: 800; }
 .catalog-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; align-items: start; gap: 22px; }
-.catalog-forms { display: grid; gap: 22px; }
+.catalog-lists { display: grid; gap: 22px; }
+.catalog-forms { display: grid; align-content: start; gap: 14px; }
+.catalog-forms form { display: grid; gap: 14px; }
+.catalog-form-tabs { margin-bottom: 4px; }
+.extra-list { display: grid; }
+.extra-list-row { display: flex; align-items: center; justify-content: space-between; padding: 11px 0; border-top: 1px solid #edf0ed; font-size: 13px; }
+.extra-list-row span { color: #53635b; font-weight: 700; }
+.recipe-header { display: flex; align-items: center; justify-content: space-between; }
+.recipe-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 22px; }
+.recipe-list { display: grid; }
+.recipe-item { border-top: 1px solid #edf0ed; }
+.recipe-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) 32px minmax(70px, auto) auto; align-items: center; gap: 8px; width: 100%; min-height: 54px; padding: 8px 0; border: 0; background: transparent; color: #263238; text-align: left; cursor: pointer; }
+.recipe-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recipe-row small { color: #78827d; }
+.recipe-triangle { color: #78827d; transition: transform .15s ease; }
+.recipe-triangle.open { transform: rotate(90deg); }
+.recipe-edit { justify-self: end; }
+.recipe-ingredients { padding: 5px 0 12px 26px; }
+.recipe-ingredients table { margin-top: 4px; }
+.recipe-editor { display: grid; gap: 10px; }
+.recipe-editor-form { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; }
 .variant-price-grid { display: flex; align-items: center; gap: 8px; }
 .variant-price { display: grid; justify-items: center; gap: 5px; }
 .variant-price strong { color: #53635b; font-size: 12px; }
@@ -1259,7 +1395,9 @@ td:last-child, th:last-child { padding-right: 0; }
   .pos-layout { grid-template-columns: 1fr; }
   .pos-ticket { position: static; }
   .catalog-layout { grid-template-columns: 1fr; }
-  .catalog-forms { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .catalog-forms { grid-template-columns: 1fr; }
+  .recipe-columns { grid-template-columns: 1fr; }
+  .recipe-editor-form { grid-template-columns: 1fr; }
   .product-grid, .extra-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 

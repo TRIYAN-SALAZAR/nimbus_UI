@@ -48,7 +48,7 @@ La interfaz incluye navegación y conexión con los siguientes módulos:
 - Resumen con estado de conexión y estadísticas.
 - Productos.
 - Productos y variantes en un catálogo combinado.
-- Extras.
+- Extras integrados en la sección Productos.
 - Insumos.
 - Stock y alertas de reabastecimiento.
 - Proveedores.
@@ -62,6 +62,10 @@ La interfaz incluye navegación y conexión con los siguientes módulos:
 Los formularios disponibles permiten crear productos, variantes, extras, insumos, proveedores y clientes. También permiten configurar recetas, registrar compras y registrar ventas. La administración de métodos y orígenes de pago está oculta en la navegación porque actualmente se utilizan catálogos definidos; sus datos siguen disponibles para las operaciones.
 
 La sección de Productos muestra el catálogo a la izquierda y los formularios de producto y variante apilados a la derecha. La tabla agrupa variantes por producto y muestra la abreviatura encima de su precio: por ejemplo, `S` sobre `30.00` y `G` sobre `40.00`. Los productos sin variantes muestran `N/A`.
+
+Los extras también se muestran en la sección Productos mediante una segunda lista. El panel derecho permite cambiar entre formularios de producto, variante y extra sin ocultar el catálogo.
+
+La sección Recetas divide variantes y extras en dos columnas. Cada elemento puede expandirse desde su triángulo para consultar sus insumos; el botón superior `Editar recetas` habilita un editor para agregar o retirar insumos.
 
 ## Compras y ventas con múltiples detalles
 
